@@ -1,10 +1,8 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import Iyzipay from 'iyzipay';
-
 import {
-  createClient as createSupabaseAdminClient
+  createClient as createSupabaseAdminClient,
 } from '@supabase/supabase-js';
-
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -12,13 +10,14 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 const EXCLUSIVE_RESERVATION_TTL_MINUTES = 60;
+const MAX_CART_ITEMS = 50;
 
 const iyzipay = new Iyzipay({
   apiKey: process.env.IYZICO_API_KEY,
   secretKey: process.env.IYZICO_SECRET_KEY,
   uri:
     process.env.IYZICO_BASE_URL ||
-    'https://sandbox-api.iyzipay.com'
+    'https://sandbox-api.iyzipay.com',
 });
 
 function getSupabaseAdmin() {
@@ -41,8 +40,8 @@ function getSupabaseAdmin() {
     {
       auth: {
         autoRefreshToken: false,
-        persistSession: false
-      }
+        persistSession: false,
+      },
     }
   );
 }
@@ -75,11 +74,7 @@ async function getSupabaseAuthClient() {
           try {
             cookiesToSet.forEach(
               ({ name, value, options }) => {
-                cookieStore.set(
-                  name,
-                  value,
-                  options
-                );
+                cookieStore.set(name, value, options);
               }
             );
           } catch {
@@ -88,8 +83,8 @@ async function getSupabaseAuthClient() {
               cannot be updated in this request context.
             */
           }
-        }
-      }
+        },
+      },
     }
   );
 }
@@ -116,9 +111,27 @@ function toNullableString(value) {
   return String(value);
 }
 
+function normalizeIdempotencyKey(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalizedValue = value
+    .trim()
+    .toLowerCase();
+
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  if (!uuidPattern.test(normalizedValue)) {
+    return null;
+  }
+
+  return normalizedValue;
+}
+
 function getBuyerIdentity(user) {
-  const metadata =
-    user.user_metadata || {};
+  const metadata = user.user_metadata || {};
 
   const fullName =
     metadata.full_name ||
@@ -130,33 +143,27 @@ function getBuyerIdentity(user) {
     .split(/\s+/)
     .filter(Boolean);
 
-  const name =
-    nameParts.shift() || 'Test';
-
-  const surname =
-    nameParts.join(' ') || 'Buyer';
+  const name = nameParts.shift() || 'Test';
+  const surname = nameParts.join(' ') || 'Buyer';
 
   return {
     name,
     surname,
-    email:
-      user.email || 'test@test.com'
+    email: user.email || 'test@test.com',
   };
 }
 
 function getBuyerIp(request) {
-  const forwardedFor =
-    request.headers.get('x-forwarded-for');
+  const forwardedFor = request.headers.get(
+    'x-forwarded-for'
+  );
 
   const forwardedIp = forwardedFor
     ?.split(',')[0]
     ?.trim();
 
-  const realIp =
-    request.headers.get('x-real-ip');
-
-  const detectedIp =
-    forwardedIp || realIp;
+  const realIp = request.headers.get('x-real-ip');
+  const detectedIp = forwardedIp || realIp;
 
   /*
     Iyzico Sandbox may reject local IP addresses,
@@ -189,10 +196,8 @@ function extractRequestedItems(items) {
 
     return {
       index,
-      beatId:
-        toNullableString(beatId),
-      licenseId:
-        toNullableString(licenseId)
+      beatId: toNullableString(beatId),
+      licenseId: toNullableString(licenseId),
     };
   });
 }
@@ -203,29 +208,23 @@ async function loadTrustedCartItems(
 ) {
   const uniqueLicenseIds = [
     ...new Set(
-      requestedItems.map(
-        (item) => item.licenseId
-      )
-    )
+      requestedItems.map((item) => item.licenseId)
+    ),
   ];
 
   const uniqueBeatIds = [
     ...new Set(
-      requestedItems.map(
-        (item) => item.beatId
-      )
-    )
+      requestedItems.map((item) => item.beatId)
+    ),
   ];
 
   /*
-    Load the real product information from Supabase.
-
-    Browser-provided titles, license names and prices
-    are ignored.
+    Browser-provided titles, license names, prices, formats,
+    and exclusivity values are never trusted.
   */
   const {
     data: databaseLicenses,
-    error: licensesError
+    error: licensesError,
   } = await supabaseAdmin
     .from('licenses')
     .select(`
@@ -251,7 +250,7 @@ async function loadTrustedCartItems(
 
   const {
     data: databaseBeats,
-    error: beatsError
+    error: beatsError,
   } = await supabaseAdmin
     .from('beats')
     .select(`
@@ -274,42 +273,36 @@ async function loadTrustedCartItems(
   }
 
   const licenseMap = new Map(
-    (databaseLicenses || []).map(
-      (license) => [
-        String(license.id),
-        license
-      ]
-    )
+    (databaseLicenses || []).map((license) => [
+      String(license.id),
+      license,
+    ])
   );
 
   const beatMap = new Map(
-    (databaseBeats || []).map(
-      (beat) => [
-        String(beat.id),
-        beat
-      ]
-    )
+    (databaseBeats || []).map((beat) => [
+      String(beat.id),
+      beat,
+    ])
   );
 
   const normalizedItems = [];
 
   for (const requestedItem of requestedItems) {
-    const databaseLicense =
-      licenseMap.get(
-        String(requestedItem.licenseId)
-      );
+    const databaseLicense = licenseMap.get(
+      String(requestedItem.licenseId)
+    );
 
-    const databaseBeat =
-      beatMap.get(
-        String(requestedItem.beatId)
-      );
+    const databaseBeat = beatMap.get(
+      String(requestedItem.beatId)
+    );
 
     if (!databaseLicense || !databaseBeat) {
       return {
         success: false,
         status: 400,
         error:
-          'One or more selected beats or licenses no longer exist.'
+          'One or more selected beats or licenses no longer exist.',
       };
     }
 
@@ -321,25 +314,22 @@ async function loadTrustedCartItems(
         success: false,
         status: 400,
         error:
-          'A selected license does not belong to the selected beat.'
+          'A selected license does not belong to the selected beat.',
       };
     }
 
-    /*
-      Once an Exclusive license has been paid, no further
-      license type can be purchased for that beat.
-    */
     if (databaseBeat.is_sold_exclusive) {
       return {
         success: false,
         status: 409,
         error:
-          `"${databaseBeat.title}" has already been sold exclusively and is no longer available.`
+          `"${databaseBeat.title}" has already been sold exclusively and is no longer available.`,
       };
     }
 
-    const databasePrice =
-      Number(databaseLicense.price);
+    const databasePrice = Number(
+      databaseLicense.price
+    );
 
     if (
       !Number.isFinite(databasePrice) ||
@@ -349,79 +339,203 @@ async function loadTrustedCartItems(
         success: false,
         status: 400,
         error:
-          'One or more selected licenses have an invalid database price.'
+          'One or more selected licenses have an invalid database price.',
       };
     }
 
-    const trustedPrice =
-      databasePrice.toFixed(2);
+    const trustedPrice = databasePrice.toFixed(2);
 
-    const trustedTitle =
-      String(
-        databaseBeat.title || 'Beat'
-      );
+    const trustedTitle = String(
+      databaseBeat.title || 'Beat'
+    );
 
-    const trustedLicenseName =
-      String(
-        databaseLicense.name ||
-          'License'
-      );
+    const trustedLicenseName = String(
+      databaseLicense.name || 'License'
+    );
 
-    const isExclusive =
-      Boolean(
-        databaseLicense.is_exclusive
-      );
+    const isExclusive = Boolean(
+      databaseLicense.is_exclusive
+    );
 
     normalizedItems.push({
-      iyzicoItemId:
-        `item_${requestedItem.index}`,
-
-      beatId:
-        String(databaseBeat.id),
-
-      licenseId:
-        String(databaseLicense.id),
-
-      title:
-        trustedTitle,
-
-      licenseName:
-        trustedLicenseName,
-
-      price:
-        trustedPrice,
-
+      iyzicoItemId: `item_${requestedItem.index}`,
+      beatId: String(databaseBeat.id),
+      licenseId: String(databaseLicense.id),
+      title: trustedTitle,
+      licenseName: trustedLicenseName,
+      price: trustedPrice,
       isExclusive,
 
       snapshot: {
-        beatId:
-          String(databaseBeat.id),
-
-        licenseId:
-          String(databaseLicense.id),
-
-        title:
-          trustedTitle,
-
-        licenseName:
-          trustedLicenseName,
-
-        price:
-          trustedPrice,
-
+        beatId: String(databaseBeat.id),
+        licenseId: String(databaseLicense.id),
+        title: trustedTitle,
+        licenseName: trustedLicenseName,
+        price: trustedPrice,
         fileFormat:
-          databaseLicense.file_format ||
-          null,
-
-        isExclusive
-      }
+          databaseLicense.file_format || null,
+        isExclusive,
+      },
     });
   }
 
   return {
     success: true,
-    items: normalizedItems
+    items: normalizedItems,
   };
+}
+
+function createCheckoutRequestHash({
+  userId,
+  normalizedItems,
+}) {
+  const canonicalItems = normalizedItems
+    .map((item) => ({
+      beatId: item.beatId,
+      licenseId: item.licenseId,
+      price: item.price,
+      isExclusive: item.isExclusive,
+    }))
+    .sort((firstItem, secondItem) => {
+      const firstKey =
+        `${firstItem.beatId}:${firstItem.licenseId}`;
+
+      const secondKey =
+        `${secondItem.beatId}:${secondItem.licenseId}`;
+
+      return firstKey.localeCompare(secondKey);
+    });
+
+  const canonicalRequest = JSON.stringify({
+    userId: String(userId),
+    currency: 'TRY',
+    items: canonicalItems,
+  });
+
+  return createHash('sha256')
+    .update(canonicalRequest)
+    .digest('hex');
+}
+
+async function findIdempotentOrder({
+  supabaseAdmin,
+  userId,
+  idempotencyKey,
+}) {
+  const { data: order, error } =
+    await supabaseAdmin
+      .from('orders')
+      .select(`
+        id,
+        public_id,
+        status,
+        checkout_request_hash,
+        payment_page_url,
+        failure_reason,
+        created_at,
+        updated_at
+      `)
+      .eq('user_id', userId)
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+
+  if (error) {
+    console.error(
+      'Idempotent order lookup error:',
+      error
+    );
+
+    throw new Error(
+      'The existing checkout attempt could not be inspected.'
+    );
+  }
+
+  return order || null;
+}
+
+function createExistingCheckoutResponse({
+  existingOrder,
+  checkoutRequestHash,
+}) {
+  if (
+    existingOrder.checkout_request_hash !==
+    checkoutRequestHash
+  ) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'This checkout key has already been used for a different cart. Start a new checkout attempt.',
+      },
+      {
+        status: 409,
+      }
+    );
+  }
+
+  if (
+    existingOrder.status ===
+      'payment_form_created' &&
+    existingOrder.payment_page_url
+  ) {
+    return NextResponse.json({
+      success: true,
+      reused: true,
+      paymentPageUrl:
+        existingOrder.payment_page_url,
+      orderPublicId:
+        existingOrder.public_id,
+    });
+  }
+
+  if (existingOrder.status === 'paid') {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'This checkout attempt has already been paid.',
+        orderPublicId:
+          existingOrder.public_id,
+      },
+      {
+        status: 409,
+      }
+    );
+  }
+
+  if (
+    [
+      'initialization_failed',
+      'initialization_error',
+    ].includes(existingOrder.status)
+  ) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          existingOrder.failure_reason ||
+          'The previous checkout attempt failed. Start a new checkout attempt.',
+      },
+      {
+        status: 409,
+      }
+    );
+  }
+
+  return NextResponse.json(
+    {
+      success: false,
+      error:
+        'This checkout request is already being processed. Please wait before trying again.',
+      retryable: true,
+    },
+    {
+      status: 409,
+      headers: {
+        'Retry-After': '2',
+      },
+    }
+  );
 }
 
 async function reserveExclusiveBeats(
@@ -433,20 +547,16 @@ async function reserveExclusiveBeats(
   const exclusiveBeatIds = [
     ...new Set(
       normalizedItems
-        .filter(
-          (item) => item.isExclusive
-        )
-        .map(
-          (item) => item.beatId
-        )
-    )
+        .filter((item) => item.isExclusive)
+        .map((item) => item.beatId)
+    ),
   ];
 
   if (exclusiveBeatIds.length === 0) {
     return {
       success: true,
       reservedBeatIds: [],
-      expiresAt: null
+      expiresAt: null,
     };
   }
 
@@ -459,23 +569,13 @@ async function reserveExclusiveBeats(
         1000
   );
 
-  /*
-    Remove expired unpaid reservations for the beats
-    currently being checked out.
-
-    Paid reservations are never removed here.
-  */
-  const {
-    error: expiredCleanupError
-  } = await supabaseAdmin
-    .from('exclusive_beat_reservations')
-    .delete()
-    .in('beat_id', exclusiveBeatIds)
-    .eq('status', 'reserved')
-    .lt(
-      'expires_at',
-      now.toISOString()
-    );
+  const { error: expiredCleanupError } =
+    await supabaseAdmin
+      .from('exclusive_beat_reservations')
+      .delete()
+      .in('beat_id', exclusiveBeatIds)
+      .eq('status', 'reserved')
+      .lt('expires_at', now.toISOString());
 
   if (expiredCleanupError) {
     console.error(
@@ -488,40 +588,29 @@ async function reserveExclusiveBeats(
     );
   }
 
-  /*
-    beat_id is the primary key of the reservation table.
-
-    Therefore, two simultaneous checkouts cannot reserve
-    the same beat. One insert succeeds and the other gets
-    a duplicate-key conflict.
-  */
-  const reservationRows =
-    exclusiveBeatIds.map((beatId) => ({
+  const reservationRows = exclusiveBeatIds.map(
+    (beatId) => ({
       beat_id: beatId,
       order_id: orderId,
       user_id: userId,
       status: 'reserved',
-      expires_at:
-        expiresAt.toISOString(),
-      updated_at:
-        now.toISOString()
-    }));
+      expires_at: expiresAt.toISOString(),
+      updated_at: now.toISOString(),
+    })
+  );
 
-  const {
-    error: reservationError
-  } = await supabaseAdmin
-    .from('exclusive_beat_reservations')
-    .insert(reservationRows);
+  const { error: reservationError } =
+    await supabaseAdmin
+      .from('exclusive_beat_reservations')
+      .insert(reservationRows);
 
   if (reservationError) {
-    if (
-      reservationError.code === '23505'
-    ) {
+    if (reservationError.code === '23505') {
       return {
         success: false,
         status: 409,
         error:
-          'One of the Exclusive licenses is currently reserved by another checkout. Please try again later.'
+          'One of the Exclusive licenses is currently reserved by another checkout. Please try again later.',
       };
     }
 
@@ -537,10 +626,8 @@ async function reserveExclusiveBeats(
 
   return {
     success: true,
-    reservedBeatIds:
-      exclusiveBeatIds,
-    expiresAt:
-      expiresAt.toISOString()
+    reservedBeatIds: exclusiveBeatIds,
+    expiresAt: expiresAt.toISOString(),
   };
 }
 
@@ -552,13 +639,12 @@ async function releaseExclusiveReservations(
     return;
   }
 
-  const {
-    error: releaseError
-  } = await supabaseAdmin
-    .from('exclusive_beat_reservations')
-    .delete()
-    .eq('order_id', orderId)
-    .eq('status', 'reserved');
+  const { error: releaseError } =
+    await supabaseAdmin
+      .from('exclusive_beat_reservations')
+      .delete()
+      .eq('order_id', orderId)
+      .eq('status', 'reserved');
 
   if (releaseError) {
     console.error(
@@ -576,17 +662,11 @@ async function deletePendingOrder(
     return;
   }
 
-  /*
-    The reservation table uses ON DELETE CASCADE,
-    so deleting the pending order also deletes its
-    associated unpaid reservation.
-  */
-  const {
-    error: orderDeleteError
-  } = await supabaseAdmin
-    .from('orders')
-    .delete()
-    .eq('id', orderId);
+  const { error: orderDeleteError } =
+    await supabaseAdmin
+      .from('orders')
+      .delete()
+      .eq('id', orderId);
 
   if (orderDeleteError) {
     console.error(
@@ -596,21 +676,35 @@ async function deletePendingOrder(
   }
 }
 
+async function initializeIyzicoCheckout(
+  requestData
+) {
+  return new Promise((resolve, reject) => {
+    iyzipay.checkoutFormInitialize.create(
+      requestData,
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(result);
+      }
+    );
+  });
+}
+
 export async function POST(request) {
   let supabaseAdmin;
   let createdOrderId = null;
 
   try {
-    /*
-      Authenticate using the Supabase session stored
-      in the browser cookies.
-    */
     const supabaseAuth =
       await getSupabaseAuthClient();
 
     const {
       data: { user },
-      error: authError
+      error: authError,
     } = await supabaseAuth.auth.getUser();
 
     if (authError || !user) {
@@ -623,22 +717,55 @@ export async function POST(request) {
         {
           success: false,
           error:
-            'You must be signed in before starting checkout.'
+            'You must be signed in before starting checkout.',
         },
         {
-          status: 401
+          status: 401,
         }
       );
     }
 
-    supabaseAdmin =
-      getSupabaseAdmin();
+    supabaseAdmin = getSupabaseAdmin();
 
-    const requestBody =
-      await request.json();
+    let requestBody;
 
-    const items =
-      requestBody?.items;
+    try {
+      requestBody = await request.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'The checkout request body is invalid.',
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const items = requestBody?.items;
+
+    const idempotencyKey =
+      normalizeIdempotencyKey(
+        request.headers.get(
+          'idempotency-key'
+        ) ||
+          requestBody?.idempotencyKey
+      );
+
+    if (!idempotencyKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'A valid checkout idempotency key is required.',
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     if (
       !Array.isArray(items) ||
@@ -647,23 +774,23 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Cart is empty'
+          error: 'Cart is empty',
         },
         {
-          status: 400
+          status: 400,
         }
       );
     }
 
-    if (items.length > 50) {
+    if (items.length > MAX_CART_ITEMS) {
       return NextResponse.json(
         {
           success: false,
           error:
-            'The cart contains too many items.'
+            'The cart contains too many items.',
         },
         {
-          status: 400
+          status: 400,
         }
       );
     }
@@ -683,18 +810,14 @@ export async function POST(request) {
         {
           success: false,
           error:
-            'One or more cart items are missing beat or license information. Please clear the cart and add the license again.'
+            'One or more cart items are missing beat or license information. Please clear the cart and add the license again.',
         },
         {
-          status: 400
+          status: 400,
         }
       );
     }
 
-    /*
-      Only one license for a particular beat may exist
-      in the same cart.
-    */
     const uniqueBeatIds = new Set(
       requestedItems.map(
         (item) => item.beatId
@@ -709,21 +832,20 @@ export async function POST(request) {
         {
           success: false,
           error:
-            'Only one license can be purchased for each beat in a single checkout.'
+            'Only one license can be purchased for each beat in a single checkout.',
         },
         {
-          status: 400
+          status: 400,
         }
       );
     }
 
-    const uniquePurchaseKeys =
-      new Set(
-        requestedItems.map(
-          (item) =>
-            `${item.beatId}:${item.licenseId}`
-        )
-      );
+    const uniquePurchaseKeys = new Set(
+      requestedItems.map(
+        (item) =>
+          `${item.beatId}:${item.licenseId}`
+      )
+    );
 
     if (
       uniquePurchaseKeys.size !==
@@ -733,18 +855,14 @@ export async function POST(request) {
         {
           success: false,
           error:
-            'The same license cannot be added to the cart more than once.'
+            'The same license cannot be added to the cart more than once.',
         },
         {
-          status: 400
+          status: 400,
         }
       );
     }
 
-    /*
-      Replace all browser-provided product information
-      with trusted database values.
-    */
     const trustedCartResult =
       await loadTrustedCartItems(
         supabaseAdmin,
@@ -755,13 +873,11 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error:
-            trustedCartResult.error
+          error: trustedCartResult.error,
         },
         {
           status:
-            trustedCartResult.status ||
-            400
+            trustedCartResult.status || 400,
         }
       );
     }
@@ -769,12 +885,26 @@ export async function POST(request) {
     const normalizedItems =
       trustedCartResult.items;
 
-    /*
-      Preserve the strict Iyzico price logic.
+    const checkoutRequestHash =
+      createCheckoutRequestHash({
+        userId: user.id,
+        normalizedItems,
+      });
 
-      The reduce now uses only database-verified
-      two-decimal price strings.
-    */
+    const existingOrder =
+      await findIdempotentOrder({
+        supabaseAdmin,
+        userId: user.id,
+        idempotencyKey,
+      });
+
+    if (existingOrder) {
+      return createExistingCheckoutResponse({
+        existingOrder,
+        checkoutRequestHash,
+      });
+    }
+
     const totalBasketPrice =
       normalizedItems.reduce(
         (sum, item) =>
@@ -785,8 +915,7 @@ export async function POST(request) {
     const formattedPrice =
       totalBasketPrice.toFixed(2);
 
-    const checkoutReference =
-      randomUUID();
+    const checkoutReference = randomUUID();
 
     const conversationId =
       `order_${checkoutReference}`;
@@ -794,55 +923,57 @@ export async function POST(request) {
     const basketId =
       `basket_${checkoutReference}`;
 
-    const buyer =
-      getBuyerIdentity(user);
+    const buyer = getBuyerIdentity(user);
 
-    /*
-      Create the order before attempting the Exclusive
-      reservation because the reservation references order_id.
-    */
     const {
       data: order,
-      error: orderError
+      error: orderError,
     } = await supabaseAdmin
       .from('orders')
       .insert({
-        user_id:
-          user.id,
+        user_id: user.id,
+        conversation_id: conversationId,
+        basket_id: basketId,
+        status: 'initializing',
+        price: formattedPrice,
+        paid_price: formattedPrice,
+        currency: 'TRY',
+        payment_provider: 'iyzico',
+        buyer_email: buyer.email,
 
-        conversation_id:
-          conversationId,
+        cart_snapshot: normalizedItems.map(
+          (item) => item.snapshot
+        ),
 
-        basket_id:
-          basketId,
+        idempotency_key:
+          idempotencyKey,
 
-        status:
-          'pending',
+        checkout_request_hash:
+          checkoutRequestHash,
 
-        price:
-          formattedPrice,
-
-        paid_price:
-          formattedPrice,
-
-        currency:
-          'TRY',
-
-        payment_provider:
-          'iyzico',
-
-        buyer_email:
-          buyer.email,
-
-        cart_snapshot:
-          normalizedItems.map(
-            (item) => item.snapshot
-          )
+        payment_page_url: null,
       })
       .select('id, public_id')
       .single();
 
     if (orderError || !order) {
+      if (orderError?.code === '23505') {
+        const concurrentOrder =
+          await findIdempotentOrder({
+            supabaseAdmin,
+            userId: user.id,
+            idempotencyKey,
+          });
+
+        if (concurrentOrder) {
+          return createExistingCheckoutResponse({
+            existingOrder:
+              concurrentOrder,
+            checkoutRequestHash,
+          });
+        }
+      }
+
       console.error(
         'Order creation error:',
         orderError
@@ -853,13 +984,8 @@ export async function POST(request) {
       );
     }
 
-    createdOrderId =
-      order.id;
+    createdOrderId = order.id;
 
-    /*
-      Reserve every Exclusive beat before creating
-      the Iyzico Checkout Form.
-    */
     const reservationResult =
       await reserveExclusiveBeats(
         supabaseAdmin,
@@ -880,48 +1006,33 @@ export async function POST(request) {
         {
           success: false,
           error:
-            reservationResult.error
+            reservationResult.error,
         },
         {
           status:
             reservationResult.status ||
-            409
+            409,
         }
       );
     }
 
     const orderItemRows =
       normalizedItems.map((item) => ({
-        order_id:
-          order.id,
-
-        beat_id:
-          item.beatId,
-
-        license_id:
-          item.licenseId,
-
-        title:
-          item.title,
-
-        license_name:
-          item.licenseName,
-
-        price:
-          item.price,
-
+        order_id: order.id,
+        beat_id: item.beatId,
+        license_id: item.licenseId,
+        title: item.title,
+        license_name: item.licenseName,
+        price: item.price,
         iyzico_item_id:
           item.iyzicoItemId,
-
-        item_snapshot:
-          item.snapshot
+        item_snapshot: item.snapshot,
       }));
 
-    const {
-      error: orderItemsError
-    } = await supabaseAdmin
-      .from('order_items')
-      .insert(orderItemRows);
+    const { error: orderItemsError } =
+      await supabaseAdmin
+        .from('order_items')
+        .insert(orderItemRows);
 
     if (orderItemsError) {
       console.error(
@@ -947,20 +1058,11 @@ export async function POST(request) {
     ).toString();
 
     const requestData = {
-      locale:
-        Iyzipay.LOCALE.TR,
-
+      locale: Iyzipay.LOCALE.TR,
       conversationId,
-
-      price:
-        formattedPrice,
-
-      paidPrice:
-        formattedPrice,
-
-      currency:
-        Iyzipay.CURRENCY.TRY,
-
+      price: formattedPrice,
+      paidPrice: formattedPrice,
+      currency: Iyzipay.CURRENCY.TRY,
       basketId,
 
       paymentGroup:
@@ -969,114 +1071,69 @@ export async function POST(request) {
       callbackUrl,
 
       buyer: {
-        id:
-          user.id,
-
-        name:
-          buyer.name,
-
-        surname:
-          buyer.surname,
-
-        gsmNumber:
-          '+905350000000',
-
-        email:
-          buyer.email,
-
-        identityNumber:
-          '11111111110',
+        id: user.id,
+        name: buyer.name,
+        surname: buyer.surname,
+        gsmNumber: '+905350000000',
+        email: buyer.email,
+        identityNumber: '11111111110',
 
         registrationAddress:
           'Nidakule Göztepe, Merdivenköy Mah. Bora Sok. No:1',
 
-        ip:
-          getBuyerIp(request),
-
-        city:
-          'Istanbul',
-
-        country:
-          'Turkey',
-
-        zipCode:
-          '34732'
+        ip: getBuyerIp(request),
+        city: 'Istanbul',
+        country: 'Turkey',
+        zipCode: '34732',
       },
 
       shippingAddress: {
         contactName:
           `${buyer.name} ${buyer.surname}`,
 
-        city:
-          'Istanbul',
-
-        country:
-          'Turkey',
+        city: 'Istanbul',
+        country: 'Turkey',
 
         address:
           'Nidakule Göztepe, Merdivenköy Mah. Bora Sok. No:1',
 
-        zipCode:
-          '34732'
+        zipCode: '34732',
       },
 
       billingAddress: {
         contactName:
           `${buyer.name} ${buyer.surname}`,
 
-        city:
-          'Istanbul',
-
-        country:
-          'Turkey',
+        city: 'Istanbul',
+        country: 'Turkey',
 
         address:
           'Nidakule Göztepe, Merdivenköy Mah. Bora Sok. No:1',
 
-        zipCode:
-          '34732'
+        zipCode: '34732',
       },
 
-      basketItems:
-        normalizedItems.map(
-          (item) => ({
-            id:
-              item.iyzicoItemId,
+      basketItems: normalizedItems.map(
+        (item) => ({
+          id: item.iyzicoItemId,
 
-            name:
-              `${item.title} - ${item.licenseName}`,
+          name:
+            `${item.title} - ${item.licenseName}`,
 
-            category1:
-              'Digital Music',
+          category1: 'Digital Music',
 
-            itemType:
-              Iyzipay
-                .BASKET_ITEM_TYPE
-                .VIRTUAL,
+          itemType:
+            Iyzipay.BASKET_ITEM_TYPE
+              .VIRTUAL,
 
-            price:
-              item.price
-          })
-        )
+          price: item.price,
+        })
+      ),
     };
 
     const checkoutForm =
-      await new Promise(
-        (resolve, reject) => {
-          iyzipay
-            .checkoutFormInitialize
-            .create(
-              requestData,
-              (error, result) => {
-                if (error) {
-                  reject(error);
-                  return;
-                }
-
-                resolve(result);
-              }
-            );
-        }
+      await initializeIyzicoCheckout(
+        requestData
       );
 
     if (
@@ -1086,7 +1143,7 @@ export async function POST(request) {
       checkoutForm.paymentPageUrl
     ) {
       const {
-        error: orderUpdateError
+        error: orderUpdateError,
       } = await supabaseAdmin
         .from('orders')
         .update({
@@ -1096,33 +1153,40 @@ export async function POST(request) {
           iyzico_token:
             checkoutForm.token,
 
+          payment_page_url:
+            checkoutForm.paymentPageUrl,
+
           iyzico_response:
             checkoutForm,
 
           updated_at:
-            new Date().toISOString()
+            new Date().toISOString(),
         })
         .eq('id', order.id);
 
       if (orderUpdateError) {
         console.error(
-          'Iyzico token could not be saved:',
+          'Iyzico checkout information could not be saved:',
           orderUpdateError
         );
 
         throw new Error(
-          'The payment form was created, but its token could not be saved.'
+          'The payment form was created, but its details could not be saved.'
         );
       }
 
       return NextResponse.json({
         success: true,
+        reused: false,
 
         paymentPageUrl:
           checkoutForm.paymentPageUrl,
 
+        orderPublicId:
+          order.public_id,
+
         exclusiveReservationExpiresAt:
-          reservationResult.expiresAt
+          reservationResult.expiresAt,
       });
     }
 
@@ -1136,7 +1200,9 @@ export async function POST(request) {
       order.id
     );
 
-    await supabaseAdmin
+    const {
+      error: failureUpdateError,
+    } = await supabaseAdmin
       .from('orders')
       .update({
         status:
@@ -1150,19 +1216,27 @@ export async function POST(request) {
           checkoutForm,
 
         updated_at:
-          new Date().toISOString()
+          new Date().toISOString(),
       })
       .eq('id', order.id);
+
+    if (failureUpdateError) {
+      console.error(
+        'Initialization failure could not be saved:',
+        failureUpdateError
+      );
+    }
 
     return NextResponse.json(
       {
         success: false,
+
         error:
           checkoutForm.errorMessage ||
-          'The payment form could not be initialized.'
+          'The payment form could not be initialized.',
       },
       {
-        status: 400
+        status: 400,
       }
     );
   } catch (error) {
@@ -1181,7 +1255,7 @@ export async function POST(request) {
       );
 
       const {
-        error: statusUpdateError
+        error: statusUpdateError,
       } = await supabaseAdmin
         .from('orders')
         .update({
@@ -1194,7 +1268,7 @@ export async function POST(request) {
               : 'Unknown checkout initialization error.',
 
           updated_at:
-            new Date().toISOString()
+            new Date().toISOString(),
         })
         .eq(
           'id',
@@ -1212,11 +1286,10 @@ export async function POST(request) {
     return NextResponse.json(
       {
         success: false,
-        error:
-          'Internal Server Error'
+        error: 'Internal Server Error',
       },
       {
-        status: 500
+        status: 500,
       }
     );
   }

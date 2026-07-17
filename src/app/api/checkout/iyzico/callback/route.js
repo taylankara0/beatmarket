@@ -26,17 +26,23 @@ function getSupabaseAdmin() {
     );
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
+  return createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
     }
-  });
+  );
 }
 
 function getBaseUrl(request) {
   if (process.env.NEXT_PUBLIC_SITE_URL) {
-    return new URL(process.env.NEXT_PUBLIC_SITE_URL);
+    return new URL(
+      process.env.NEXT_PUBLIC_SITE_URL
+    );
   }
 
   return new URL(request.url);
@@ -71,51 +77,66 @@ function createRedirect(
     Iyzico sends the callback as a POST request.
 
     A 303 redirect makes the browser open the destination
-    page using GET instead of repeating the POST request.
+    page with GET instead of repeating the POST request.
   */
-  return NextResponse.redirect(redirectUrl, 303);
+  return NextResponse.redirect(
+    redirectUrl,
+    303
+  );
 }
 
 async function extractToken(request) {
   const contentType =
     request.headers.get('content-type') || '';
 
-  if (contentType.includes('application/json')) {
+  if (
+    contentType.includes(
+      'application/json'
+    )
+  ) {
     const body = await request.json();
 
     return body?.token || null;
   }
 
   if (
-    contentType.includes('multipart/form-data') ||
+    contentType.includes(
+      'multipart/form-data'
+    ) ||
     contentType.includes(
       'application/x-www-form-urlencoded'
     )
   ) {
-    const formData = await request.formData();
+    const formData =
+      await request.formData();
 
     return formData.get('token');
   }
 
-  const rawBody = await request.text();
+  const rawBody =
+    await request.text();
 
   if (!rawBody) {
     return null;
   }
 
-  const bodyParams = new URLSearchParams(rawBody);
+  const bodyParams =
+    new URLSearchParams(rawBody);
 
   return bodyParams.get('token');
 }
 
 function moneyToCents(value) {
-  const numericValue = Number(value);
+  const numericValue =
+    Number(value);
 
   if (!Number.isFinite(numericValue)) {
     return null;
   }
 
-  return Math.round(numericValue * 100);
+  return Math.round(
+    numericValue * 100
+  );
 }
 
 function hasValue(value) {
@@ -126,6 +147,72 @@ function hasValue(value) {
   );
 }
 
+function isTrue(value) {
+  return (
+    value === true ||
+    value === 1 ||
+    String(value).toLowerCase() ===
+      'true'
+  );
+}
+
+function getCartSnapshot(order) {
+  const snapshot =
+    order?.cart_snapshot;
+
+  if (Array.isArray(snapshot)) {
+    return snapshot;
+  }
+
+  if (typeof snapshot === 'string') {
+    try {
+      const parsedSnapshot =
+        JSON.parse(snapshot);
+
+      return Array.isArray(
+        parsedSnapshot
+      )
+        ? parsedSnapshot
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+function getExclusiveBeatIds(order) {
+  const cartSnapshot =
+    getCartSnapshot(order);
+
+  const exclusiveBeatIds =
+    cartSnapshot
+      .map((item) => {
+        const isExclusive =
+          item?.isExclusive ??
+          item?.is_exclusive;
+
+        const beatId =
+          item?.beatId ??
+          item?.beat_id;
+
+        if (
+          !isTrue(isExclusive) ||
+          !hasValue(beatId)
+        ) {
+          return null;
+        }
+
+        return String(beatId);
+      })
+      .filter(Boolean);
+
+  return [
+    ...new Set(exclusiveBeatIds)
+  ];
+}
+
 function verifyPaymentAgainstOrder(
   paymentResult,
   order,
@@ -133,14 +220,17 @@ function verifyPaymentAgainstOrder(
 ) {
   const errors = [];
 
-  if (paymentResult.status !== 'success') {
+  if (
+    paymentResult.status !== 'success'
+  ) {
     errors.push(
       'Iyzico API status is not success.'
     );
   }
 
   if (
-    paymentResult.paymentStatus !== 'SUCCESS'
+    paymentResult.paymentStatus !==
+    'SUCCESS'
   ) {
     errors.push(
       'Iyzico payment status is not SUCCESS.'
@@ -154,14 +244,15 @@ function verifyPaymentAgainstOrder(
   }
 
   /*
-    The order was found using the token saved during
+    The order was found using the token stored during
     Checkout Form initialization.
 
-    If Iyzico returns the token again, it must match.
+    When Iyzico returns the token again, it must match.
   */
   if (
     hasValue(paymentResult.token) &&
-    String(paymentResult.token) !== String(token)
+    String(paymentResult.token) !==
+      String(token)
   ) {
     errors.push(
       'The returned Iyzico token does not match.'
@@ -169,15 +260,17 @@ function verifyPaymentAgainstOrder(
   }
 
   /*
-    checkoutForm.retrieve may not include conversationId
-    in its response.
+    checkoutForm.retrieve may not include conversationId.
 
-    Therefore, compare it only when Iyzico actually
-    returns a conversationId.
+    Compare it only when Iyzico returns one.
   */
   if (
-    hasValue(paymentResult.conversationId) &&
-    String(paymentResult.conversationId) !==
+    hasValue(
+      paymentResult.conversationId
+    ) &&
+    String(
+      paymentResult.conversationId
+    ) !==
       String(order.conversation_id)
   ) {
     errors.push(
@@ -185,10 +278,9 @@ function verifyPaymentAgainstOrder(
     );
   }
 
-  /*
-    Basket ID must be present and must match the order.
-  */
-  if (!hasValue(paymentResult.basketId)) {
+  if (
+    !hasValue(paymentResult.basketId)
+  ) {
     errors.push(
       'The Iyzico basket ID is missing.'
     );
@@ -201,21 +293,21 @@ function verifyPaymentAgainstOrder(
     );
   }
 
-  const expectedPrice = moneyToCents(
-    order.price
-  );
+  const expectedPrice =
+    moneyToCents(order.price);
 
-  const expectedPaidPrice = moneyToCents(
-    order.paid_price
-  );
+  const expectedPaidPrice =
+    moneyToCents(order.paid_price);
 
-  const retrievedPrice = moneyToCents(
-    paymentResult.price
-  );
+  const retrievedPrice =
+    moneyToCents(
+      paymentResult.price
+    );
 
-  const retrievedPaidPrice = moneyToCents(
-    paymentResult.paidPrice
-  );
+  const retrievedPaidPrice =
+    moneyToCents(
+      paymentResult.paidPrice
+    );
 
   if (
     expectedPrice === null ||
@@ -230,7 +322,8 @@ function verifyPaymentAgainstOrder(
   if (
     expectedPaidPrice === null ||
     retrievedPaidPrice === null ||
-    expectedPaidPrice !== retrievedPaidPrice
+    expectedPaidPrice !==
+      retrievedPaidPrice
   ) {
     errors.push(
       'The retrieved paid price does not match the order.'
@@ -241,7 +334,9 @@ function verifyPaymentAgainstOrder(
     String(
       paymentResult.currency || ''
     ).toUpperCase() !==
-    String(order.currency || '').toUpperCase()
+    String(
+      order.currency || ''
+    ).toUpperCase()
   ) {
     errors.push(
       'The retrieved currency does not match the order.'
@@ -251,62 +346,293 @@ function verifyPaymentAgainstOrder(
   return errors;
 }
 
+async function releaseExclusiveReservations(
+  supabase,
+  orderId
+) {
+  const {
+    error: releaseError
+  } = await supabase
+    .from(
+      'exclusive_beat_reservations'
+    )
+    .delete()
+    .eq('order_id', orderId)
+    .eq('status', 'reserved');
+
+  if (releaseError) {
+    console.error(
+      'Exclusive reservation release error:',
+      releaseError
+    );
+  }
+}
+
+async function holdExclusiveReservationsForReview(
+  supabase,
+  orderId
+) {
+  /*
+    A payment reported as successful but failing our
+    verification must not automatically release the beat.
+
+    Setting expires_at to null keeps the reservation until
+    the payment can be reviewed manually.
+  */
+  const {
+    error: holdError
+  } = await supabase
+    .from(
+      'exclusive_beat_reservations'
+    )
+    .update({
+      expires_at: null,
+      updated_at:
+        new Date().toISOString()
+    })
+    .eq('order_id', orderId)
+    .eq('status', 'reserved');
+
+  if (holdError) {
+    console.error(
+      'Exclusive reservation review hold error:',
+      holdError
+    );
+  }
+}
+
+async function finalizeExclusiveSale(
+  supabase,
+  order
+) {
+  const exclusiveBeatIds =
+    getExclusiveBeatIds(order);
+
+  /*
+    Normal license orders do not create an Exclusive
+    reservation and require no additional processing.
+  */
+  if (
+    exclusiveBeatIds.length === 0
+  ) {
+    return;
+  }
+
+  const updatedAt =
+    new Date().toISOString();
+
+  /*
+    Convert this order's reservations from reserved to paid.
+
+    A paid reservation has no expiration date and therefore
+    cannot be deleted by the expired-reservation cleanup.
+  */
+  const {
+    data: finalizedReservations,
+    error: reservationUpdateError
+  } = await supabase
+    .from(
+      'exclusive_beat_reservations'
+    )
+    .update({
+      status: 'paid',
+      expires_at: null,
+      updated_at: updatedAt
+    })
+    .eq('order_id', order.id)
+    .in(
+      'beat_id',
+      exclusiveBeatIds
+    )
+    .in(
+      'status',
+      ['reserved', 'paid']
+    )
+    .select('beat_id');
+
+  if (reservationUpdateError) {
+    console.error(
+      'Exclusive reservation finalization error:',
+      reservationUpdateError
+    );
+
+    throw new Error(
+      'The Exclusive reservation could not be finalized.'
+    );
+  }
+
+  const finalizedBeatIdSet =
+    new Set(
+      (finalizedReservations || [])
+        .map(
+          (reservation) =>
+            String(
+              reservation.beat_id
+            )
+        )
+    );
+
+  const missingReservationBeatIds =
+    exclusiveBeatIds.filter(
+      (beatId) =>
+        !finalizedBeatIdSet.has(
+          String(beatId)
+        )
+    );
+
+  /*
+    Never mark the order paid when its Exclusive reservation
+    has disappeared or belongs to another order.
+  */
+  if (
+    missingReservationBeatIds.length >
+    0
+  ) {
+    console.error(
+      'Exclusive reservation missing for paid order:',
+      {
+        orderId: order.id,
+        missingReservationBeatIds
+      }
+    );
+
+    throw new Error(
+      'A required Exclusive reservation is missing.'
+    );
+  }
+
+  /*
+    Remove each purchased Exclusive beat from future sales.
+  */
+  const {
+    data: soldBeats,
+    error: beatUpdateError
+  } = await supabase
+    .from('beats')
+    .update({
+      is_sold_exclusive: true
+    })
+    .in('id', exclusiveBeatIds)
+    .select('id');
+
+  if (beatUpdateError) {
+    console.error(
+      'Exclusive beat sale finalization error:',
+      beatUpdateError
+    );
+
+    throw new Error(
+      'The beat could not be marked as sold exclusively.'
+    );
+  }
+
+  const soldBeatIdSet =
+    new Set(
+      (soldBeats || []).map(
+        (beat) =>
+          String(beat.id)
+      )
+    );
+
+  const missingSoldBeatIds =
+    exclusiveBeatIds.filter(
+      (beatId) =>
+        !soldBeatIdSet.has(
+          String(beatId)
+        )
+    );
+
+  if (
+    missingSoldBeatIds.length > 0
+  ) {
+    console.error(
+      'Some Exclusive beats could not be finalized:',
+      {
+        orderId: order.id,
+        missingSoldBeatIds
+      }
+    );
+
+    throw new Error(
+      'One or more Exclusive beats could not be finalized.'
+    );
+  }
+}
+
 async function updateOrderItemTransactions(
   supabase,
   orderId,
   itemTransactions
 ) {
-  if (!Array.isArray(itemTransactions)) {
+  if (
+    !Array.isArray(itemTransactions)
+  ) {
     return;
   }
 
-  const updateResults = await Promise.all(
-    itemTransactions.map(
-      async (transaction) => {
-        if (!transaction.itemId) {
-          return null;
+  const updateResults =
+    await Promise.all(
+      itemTransactions.map(
+        async (transaction) => {
+          if (!transaction.itemId) {
+            return null;
+          }
+
+          const {
+            error
+          } = await supabase
+            .from('order_items')
+            .update({
+              payment_transaction_id:
+                transaction
+                  .paymentTransactionId ||
+                null,
+
+              iyzico_paid_price:
+                transaction.paidPrice !==
+                  null &&
+                transaction.paidPrice !==
+                  undefined
+                  ? Number(
+                      transaction.paidPrice
+                    ).toFixed(2)
+                  : null,
+
+              iyzico_transaction_status:
+                transaction
+                  .transactionStatus !==
+                  null &&
+                transaction
+                  .transactionStatus !==
+                  undefined
+                  ? String(
+                      transaction
+                        .transactionStatus
+                    )
+                  : null
+            })
+            .eq(
+              'order_id',
+              orderId
+            )
+            .eq(
+              'iyzico_item_id',
+              String(
+                transaction.itemId
+              )
+            );
+
+          return error;
         }
-
-        const { error } = await supabase
-          .from('order_items')
-          .update({
-            payment_transaction_id:
-              transaction.paymentTransactionId ||
-              null,
-
-            iyzico_paid_price:
-              transaction.paidPrice !== null &&
-              transaction.paidPrice !== undefined
-                ? Number(
-                    transaction.paidPrice
-                  ).toFixed(2)
-                : null,
-
-            iyzico_transaction_status:
-              transaction.transactionStatus !==
-                null &&
-              transaction.transactionStatus !==
-                undefined
-                ? String(
-                    transaction.transactionStatus
-                  )
-                : null
-          })
-          .eq('order_id', orderId)
-          .eq(
-            'iyzico_item_id',
-            String(transaction.itemId)
-          );
-
-        return error;
-      }
-    )
-  );
+      )
+    );
 
   const transactionErrors =
     updateResults.filter(Boolean);
 
-  if (transactionErrors.length > 0) {
+  if (
+    transactionErrors.length > 0
+  ) {
     console.error(
       'Some order item transaction details could not be updated:',
       transactionErrors
@@ -319,9 +645,11 @@ export async function POST(request) {
   let order = null;
 
   try {
-    supabase = getSupabaseAdmin();
+    supabase =
+      getSupabaseAdmin();
 
-    const token = await extractToken(request);
+    const token =
+      await extractToken(request);
 
     if (
       !token ||
@@ -341,8 +669,8 @@ export async function POST(request) {
     }
 
     /*
-      Find the order using the Iyzico token saved during
-      Checkout Form initialization.
+      Find the pending order using the Iyzico token saved
+      during Checkout Form initialization.
     */
     const {
       data: existingOrder,
@@ -358,7 +686,8 @@ export async function POST(request) {
         price,
         paid_price,
         currency,
-        payment_id
+        payment_id,
+        cart_snapshot
       `)
       .eq('iyzico_token', token)
       .maybeSingle();
@@ -391,36 +720,58 @@ export async function POST(request) {
     order = existingOrder;
 
     /*
-      Retrieve the result directly from Iyzico.
+      Iyzico may send the same callback multiple times.
 
-      The browser redirect itself is not proof that
-      the payment was successful.
+      A previously verified paid order must not be modified
+      or charged/granted again.
     */
-    const paymentResult = await new Promise(
-      (resolve, reject) => {
-        iyzipay.checkoutForm.retrieve(
-          {
-            locale: Iyzipay.LOCALE.TR,
-            token
-          },
-          (error, result) => {
-            if (error) {
-              reject(error);
-              return;
-            }
-
-            resolve(result);
-          }
-        );
-      }
-    );
+    if (order.status === 'paid') {
+      return createRedirect(
+        request,
+        '/payment/success',
+        {
+          order: order.public_id
+        }
+      );
+    }
 
     /*
-      If Iyzico reports failure, store the result
-      and redirect to the failed-payment state.
+      Retrieve the payment directly from Iyzico.
+
+      The browser redirect itself is not proof that the
+      payment succeeded.
+    */
+    const paymentResult =
+      await new Promise(
+        (resolve, reject) => {
+          iyzipay
+            .checkoutForm
+            .retrieve(
+              {
+                locale:
+                  Iyzipay.LOCALE.TR,
+                token
+              },
+              (error, result) => {
+                if (error) {
+                  reject(error);
+                  return;
+                }
+
+                resolve(result);
+              }
+            );
+        }
+      );
+
+    /*
+      A confirmed payment failure releases the temporary
+      Exclusive reservation so the beat can be purchased
+      by another customer.
     */
     if (
-      paymentResult.status !== 'success' ||
+      paymentResult.status !==
+        'success' ||
       paymentResult.paymentStatus !==
         'SUCCESS'
     ) {
@@ -434,22 +785,27 @@ export async function POST(request) {
       } = await supabase
         .from('orders')
         .update({
-          status: 'payment_failed',
+          status:
+            'payment_failed',
 
           payment_status:
-            paymentResult.paymentStatus ||
+            paymentResult
+              .paymentStatus ||
             'FAILED',
 
           failure_reason:
-            paymentResult.errorMessage ||
+            paymentResult
+              .errorMessage ||
             'Iyzico did not report a successful payment.',
 
-          iyzico_response: paymentResult,
+          iyzico_response:
+            paymentResult,
 
           updated_at:
             new Date().toISOString()
         })
-        .eq('id', order.id);
+        .eq('id', order.id)
+        .neq('status', 'paid');
 
       if (failedUpdateError) {
         console.error(
@@ -457,6 +813,11 @@ export async function POST(request) {
           failedUpdateError
         );
       }
+
+      await releaseExclusiveReservations(
+        supabase,
+        order.id
+      );
 
       return createRedirect(
         request,
@@ -469,10 +830,7 @@ export async function POST(request) {
 
     /*
       Verify that the successful Iyzico payment belongs
-      to the order created before checkout.
-
-      conversationId is checked only when it is present
-      in the retrieve response.
+      to this exact order.
     */
     const verificationErrors =
       verifyPaymentAgainstOrder(
@@ -481,39 +839,61 @@ export async function POST(request) {
         token
       );
 
-    if (verificationErrors.length > 0) {
+    if (
+      verificationErrors.length > 0
+    ) {
       console.error(
         'Payment verification failed:',
         verificationErrors
       );
 
       const {
-        error: verificationUpdateError
+        error:
+          verificationUpdateError
       } = await supabase
         .from('orders')
         .update({
-          status: 'verification_failed',
+          status:
+            'verification_failed',
 
           payment_status:
-            paymentResult.paymentStatus ||
+            paymentResult
+              .paymentStatus ||
             null,
 
           failure_reason:
-            verificationErrors.join(' '),
+            verificationErrors.join(
+              ' '
+            ),
 
-          iyzico_response: paymentResult,
+          iyzico_response:
+            paymentResult,
 
           updated_at:
             new Date().toISOString()
         })
-        .eq('id', order.id);
+        .eq('id', order.id)
+        .neq('status', 'paid');
 
-      if (verificationUpdateError) {
+      if (
+        verificationUpdateError
+      ) {
         console.error(
           'Verification failure could not be saved:',
           verificationUpdateError
         );
       }
+
+      /*
+        Iyzico reported success, so do not release the
+        Exclusive beat automatically.
+
+        Hold it for manual investigation instead.
+      */
+      await holdExclusiveReservationsForReview(
+        supabase,
+        order.id
+      );
 
       return createRedirect(
         request,
@@ -525,52 +905,34 @@ export async function POST(request) {
     }
 
     /*
-      Iyzico may send the same callback more than once.
+      Finalize the Exclusive reservation before marking the
+      order paid.
 
-      If the order is already paid with the same payment ID,
-      do not process or grant it a second time.
+      If a later database operation fails, the paid
+      reservation remains protected and the callback can be
+      retried safely.
     */
-    if (order.status === 'paid') {
-      if (
-        order.payment_id &&
-        String(order.payment_id) !==
-          String(paymentResult.paymentId)
-      ) {
-        console.error(
-          'The order is already paid with a different payment ID.'
-        );
+    await finalizeExclusiveSale(
+      supabase,
+      order
+    );
 
-        return createRedirect(
-          request,
-          '/explore',
-          {
-            payment: 'error'
-          }
-        );
-      }
+    const paidAt =
+      new Date().toISOString();
 
-      return createRedirect(
-        request,
-        '/payment/success',
-        {
-          order: order.public_id
-        }
-      );
-    }
-
-    /*
-      Mark the verified order as paid.
-    */
     const {
       data: paidOrder,
       error: paidOrderError
     } = await supabase
       .from('orders')
       .update({
-        status: 'paid',
+        status:
+          'paid',
 
         payment_id:
-          String(paymentResult.paymentId),
+          String(
+            paymentResult.paymentId
+          ),
 
         payment_status:
           paymentResult.paymentStatus,
@@ -580,24 +942,24 @@ export async function POST(request) {
             paymentResult.paidPrice
           ).toFixed(2),
 
-        iyzico_response: paymentResult,
+        iyzico_response:
+          paymentResult,
 
-        failure_reason: null,
+        failure_reason:
+          null,
 
         paid_at:
-          new Date().toISOString(),
+          paidAt,
 
         updated_at:
-          new Date().toISOString()
+          paidAt
       })
       .eq('id', order.id)
+      .neq('status', 'paid')
       .select('id, public_id')
-      .single();
+      .maybeSingle();
 
-    if (
-      paidOrderError ||
-      !paidOrder
-    ) {
+    if (paidOrderError) {
       console.error(
         'Verified order could not be marked as paid:',
         paidOrderError
@@ -605,6 +967,96 @@ export async function POST(request) {
 
       throw new Error(
         'The payment was verified, but the order could not be finalized.'
+      );
+    }
+
+    /*
+      Two valid callbacks can pass the initial paid-status check
+      at nearly the same time.
+
+      In that race, one callback marks the order paid and the
+      other callback's conditional update returns no row. Re-read
+      the order and treat it as success only when the stored
+      payment ID matches this verified Iyzico payment.
+    */
+    if (!paidOrder) {
+      const {
+        data: concurrentlyPaidOrder,
+        error: concurrentOrderError
+      } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          public_id,
+          status,
+          payment_id
+        `)
+        .eq('id', order.id)
+        .maybeSingle();
+
+      if (concurrentOrderError) {
+        console.error(
+          'Concurrent paid order lookup error:',
+          concurrentOrderError
+        );
+
+        throw new Error(
+          'The completed order could not be re-read.'
+        );
+      }
+
+      const sameVerifiedPayment =
+        concurrentlyPaidOrder?.status ===
+          'paid' &&
+        String(
+          concurrentlyPaidOrder.payment_id ||
+          ''
+        ) ===
+          String(paymentResult.paymentId);
+
+      if (!sameVerifiedPayment) {
+        console.error(
+          'Concurrent callback did not resolve to the same paid order:',
+          {
+            orderId:
+              order.id,
+
+            storedStatus:
+              concurrentlyPaidOrder?.status ||
+              null,
+
+            storedPaymentId:
+              concurrentlyPaidOrder?.payment_id ||
+              null,
+
+            retrievedPaymentId:
+              paymentResult.paymentId
+          }
+        );
+
+        throw new Error(
+          'The payment was verified, but the order could not be finalized safely.'
+        );
+      }
+
+      /*
+        This update is idempotent. It also recovers item-level
+        transaction details when the winning callback completed
+        the order update but had not yet stored those details.
+      */
+      await updateOrderItemTransactions(
+        supabase,
+        concurrentlyPaidOrder.id,
+        paymentResult.itemTransactions
+      );
+
+      return createRedirect(
+        request,
+        '/payment/success',
+        {
+          order:
+            concurrentlyPaidOrder.public_id
+        }
       );
     }
 
@@ -618,15 +1070,16 @@ export async function POST(request) {
     );
 
     /*
-      Only the public order ID is placed in the URL.
+      Only the public order ID is included in the URL.
 
-      The Iyzico token and payment ID are not exposed.
+      The Iyzico token and payment ID remain private.
     */
     return createRedirect(
       request,
       '/payment/success',
       {
-        order: paidOrder.public_id
+        order:
+          paidOrder.public_id
       }
     );
   } catch (error) {
@@ -635,6 +1088,13 @@ export async function POST(request) {
       error
     );
 
+    /*
+      Do not release an Exclusive reservation here.
+
+      A callback error may occur after Iyzico has successfully
+      collected payment. Releasing it could allow the same
+      Exclusive beat to be sold twice.
+    */
     if (
       supabase &&
       order?.id
@@ -644,7 +1104,8 @@ export async function POST(request) {
       } = await supabase
         .from('orders')
         .update({
-          status: 'callback_error',
+          status:
+            'callback_error',
 
           failure_reason:
             error instanceof Error

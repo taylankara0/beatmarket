@@ -8,11 +8,12 @@ export default function ExplorePage() {
   const [beats, setBeats] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const supabase = createClient();
   const { addToCart } = useCart();
 
   useEffect(() => {
     async function fetchBeats() {
+      const supabase = createClient();
+
       const { data, error } = await supabase
         .from('beats')
         .select(`
@@ -20,6 +21,7 @@ export default function ExplorePage() {
           title,
           bpm,
           preview_url,
+          is_sold_exclusive,
           profiles (
             username,
             display_name
@@ -53,21 +55,39 @@ export default function ExplorePage() {
     beat,
     license
   ) {
+    /*
+      A beat sold through an Exclusive license cannot
+      be added to the cart under any license type.
+    */
+    if (beat.is_sold_exclusive) {
+      return;
+    }
+
     addToCart({
       /*
         Use the beat and license IDs together so each
         license option has a unique cart item ID.
       */
-      id: `${beat.id}-${license.id}`,
+      id:
+        `${beat.id}-${license.id}`,
 
-      beatId: beat.id,
-      licenseId: license.id,
+      beatId:
+        beat.id,
 
-      title: beat.title,
-      price: license.price,
+      licenseId:
+        license.id,
 
-      licenseName: license.name,
-      licenseType: license.name,
+      title:
+        beat.title,
+
+      price:
+        license.price,
+
+      licenseName:
+        license.name,
+
+      licenseType:
+        license.name,
 
       producer:
         beat.profiles?.username ||
@@ -105,15 +125,25 @@ export default function ExplorePage() {
             const exclusiveLicense =
               beat.licenses?.find(
                 (license) =>
-                  license.name === 'Exclusive'
+                  license.name ===
+                  'Exclusive'
+              );
+
+            const isSoldExclusive =
+              Boolean(
+                beat.is_sold_exclusive
               );
 
             return (
               <div
                 key={beat.id}
-                className="rounded-xl border border-gray-700 bg-gray-800 p-5 shadow-lg transition-colors hover:border-indigo-500"
+                className={`rounded-xl border bg-gray-800 p-5 shadow-lg transition-colors ${
+                  isSoldExclusive
+                    ? 'border-red-900 opacity-75'
+                    : 'border-gray-700 hover:border-indigo-500'
+                }`}
               >
-                <div className="mb-4 flex items-start justify-between">
+                <div className="mb-4 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="truncate text-xl font-bold">
                       {beat.title}
@@ -121,61 +151,87 @@ export default function ExplorePage() {
 
                     <p className="text-sm text-gray-400">
                       by @
-                      {beat.profiles?.username ||
+                      {beat.profiles
+                        ?.username ||
                         'Unknown Producer'}
                     </p>
                   </div>
 
-                  {beat.bpm && (
-                    <span className="ml-3 shrink-0 rounded-full bg-gray-700 px-2 py-1 text-xs">
-                      {beat.bpm} BPM
-                    </span>
-                  )}
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    {beat.bpm && (
+                      <span className="rounded-full bg-gray-700 px-2 py-1 text-xs">
+                        {beat.bpm} BPM
+                      </span>
+                    )}
+
+                    {isSoldExclusive && (
+                      <span className="rounded-full bg-red-900 px-2 py-1 text-xs font-semibold text-red-200">
+                        Sold Exclusive
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="mt-4 space-y-3">
-                  {basicLicense && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleAddLicenseToCart(
-                          beat,
-                          basicLicense
-                        )
-                      }
-                      className="flex w-full items-center justify-between rounded-lg bg-gray-700 p-3 transition hover:bg-gray-600"
-                    >
-                      <span className="text-sm font-medium">
-                        Add Basic to Cart
-                      </span>
+                {isSoldExclusive ? (
+                  <div className="mt-4 rounded-lg border border-red-900 bg-red-950/40 p-4 text-center">
+                    <p className="font-semibold text-red-300">
+                      No longer available
+                    </p>
 
-                      <span className="font-bold text-indigo-400">
-                        ${basicLicense.price}
-                      </span>
-                    </button>
-                  )}
+                    <p className="mt-1 text-xs text-red-200/70">
+                      This beat has been sold
+                      through an Exclusive
+                      license.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {basicLicense && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddLicenseToCart(
+                            beat,
+                            basicLicense
+                          )
+                        }
+                        className="flex w-full items-center justify-between rounded-lg bg-gray-700 p-3 transition hover:bg-gray-600"
+                      >
+                        <span className="text-sm font-medium">
+                          Add Basic to Cart
+                        </span>
 
-                  {exclusiveLicense && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleAddLicenseToCart(
-                          beat,
-                          exclusiveLicense
-                        )
-                      }
-                      className="flex w-full items-center justify-between rounded-lg bg-gray-700 p-3 transition hover:bg-gray-600"
-                    >
-                      <span className="text-sm font-medium">
-                        Add Exclusive to Cart
-                      </span>
+                        <span className="font-bold text-indigo-400">
+                          ${basicLicense.price}
+                        </span>
+                      </button>
+                    )}
 
-                      <span className="font-bold text-green-400">
-                        ${exclusiveLicense.price}
-                      </span>
-                    </button>
-                  )}
-                </div>
+                    {exclusiveLicense && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddLicenseToCart(
+                            beat,
+                            exclusiveLicense
+                          )
+                        }
+                        className="flex w-full items-center justify-between rounded-lg bg-gray-700 p-3 transition hover:bg-gray-600"
+                      >
+                        <span className="text-sm font-medium">
+                          Add Exclusive to Cart
+                        </span>
+
+                        <span className="font-bold text-green-400">
+                          $
+                          {
+                            exclusiveLicense.price
+                          }
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-4">
                   <button

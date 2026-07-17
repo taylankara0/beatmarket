@@ -1,54 +1,319 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase-client';
+
+const MEGABYTE = 1024 * 1024;
+const PREVIEW_MAX_BYTES = 25 * MEGABYTE;
+const MASTER_MAX_BYTES = 250 * MEGABYTE;
 
 export default function UploadBeatPage() {
-  const supabase = createClient();
-
   const [title, setTitle] = useState('');
-  const [priceBasic, setPriceBasic] = useState('29.99');
-  const [priceExclusive, setPriceExclusive] = useState('199.99');
+
+  const [priceBasic, setPriceBasic] =
+    useState('29.99');
+
+  const [
+    priceExclusive,
+    setPriceExclusive
+  ] = useState('199.99');
+
   const [bpm, setBpm] = useState('');
 
-  const [previewFile, setPreviewFile] = useState(null);
-  const [untaggedFile, setUntaggedFile] = useState(null);
+  const [previewFile, setPreviewFile] =
+    useState(null);
 
-  const [uploading, setUploading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
+  const [
+    untaggedFile,
+    setUntaggedFile
+  ] = useState(null);
 
-  async function uploadToR2(file) {
-    if (!file) {
-      return null;
+  const [uploading, setUploading] =
+    useState(false);
+
+  const [
+    statusMessage,
+    setStatusMessage
+  ] = useState('');
+
+  function sanitizeFilename(name) {
+    return name.replace(
+      /[^a-zA-Z0-9._-]/g,
+      '_'
+    );
+  }
+
+  function getContentType(file) {
+    if (file?.type) {
+      return file.type
+        .toLowerCase()
+        .split(';')[0]
+        .trim();
     }
 
-    const contentType =
-      file.type || 'application/octet-stream';
+    const extension =
+      file?.name
+        ?.split('.')
+        .pop()
+        ?.toLowerCase() || '';
 
-    const response = await fetch('/api/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        filename: file.name,
-        contentType
-      })
-    });
+    if (extension === 'mp3') {
+      return 'audio/mpeg';
+    }
 
-    if (!response.ok) {
-      const responseBody = await response
-        .json()
-        .catch(() => null);
+    if (extension === 'wav') {
+      return 'audio/wav';
+    }
 
+    if (extension === 'flac') {
+      return 'audio/flac';
+    }
+
+    return '';
+  }
+
+  function formatMegabytes(bytes) {
+    return Math.round(
+      bytes / MEGABYTE
+    );
+  }
+
+  function getMaximumFileSize(
+    uploadType
+  ) {
+    if (uploadType === 'preview') {
+      return PREVIEW_MAX_BYTES;
+    }
+
+    if (uploadType === 'master') {
+      return MASTER_MAX_BYTES;
+    }
+
+    return 0;
+  }
+
+  function validateFileSize(
+    file,
+    uploadType
+  ) {
+    const maximumBytes =
+      getMaximumFileSize(
+        uploadType
+      );
+
+    if (!maximumBytes) {
       throw new Error(
-        responseBody?.error ||
-          `Failed to create an upload URL for ${file.name}.`
+        'The upload type is invalid.'
       );
     }
 
-    const { uploadUrl, fileKey } =
-      await response.json();
+    if (
+      !Number.isSafeInteger(file.size) ||
+      file.size <= 0
+    ) {
+      throw new Error(
+        `${file.name} is empty or has an invalid size.`
+      );
+    }
+
+    if (file.size > maximumBytes) {
+      throw new Error(
+        `The ${uploadType} file cannot exceed ${formatMegabytes(
+          maximumBytes
+        )} MB.`
+      );
+    }
+  }
+
+  function validateFileType(
+    file,
+    uploadType
+  ) {
+    const contentType =
+      getContentType(file);
+
+    const extension =
+      file.name
+        .split('.')
+        .pop()
+        ?.toLowerCase() || '';
+
+    if (uploadType === 'preview') {
+      const isMp3 =
+        (
+          contentType ===
+            'audio/mpeg' ||
+          contentType ===
+            'audio/mp3'
+        ) &&
+        extension === 'mp3';
+
+      if (!isMp3) {
+        throw new Error(
+          'The streaming preview must be an MP3 file.'
+        );
+      }
+
+      return;
+    }
+
+    if (uploadType === 'master') {
+      const allowedMasterTypes = [
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/wav',
+        'audio/x-wav',
+        'audio/wave',
+        'audio/vnd.wave',
+        'audio/flac',
+        'audio/x-flac'
+      ];
+
+      const allowedExtensions = [
+        'mp3',
+        'wav',
+        'flac'
+      ];
+
+      if (
+        !allowedMasterTypes.includes(
+          contentType
+        ) ||
+        !allowedExtensions.includes(
+          extension
+        )
+      ) {
+        throw new Error(
+          'The master track must be an MP3, WAV, or FLAC file.'
+        );
+      }
+
+      return;
+    }
+
+    throw new Error(
+      'The upload type is invalid.'
+    );
+  }
+
+  function validateAudioFile(
+    file,
+    uploadType
+  ) {
+    if (!file) {
+      throw new Error(
+        'An audio file is missing.'
+      );
+    }
+
+    validateFileSize(
+      file,
+      uploadType
+    );
+
+    validateFileType(
+      file,
+      uploadType
+    );
+  }
+
+  function createCleanFile(
+    file,
+    uploadType
+  ) {
+    validateAudioFile(
+      file,
+      uploadType
+    );
+
+    const contentType =
+      getContentType(file);
+
+    if (!contentType) {
+      throw new Error(
+        `${file.name} does not have a supported audio format.`
+      );
+    }
+
+    return new File(
+      [file],
+      sanitizeFilename(file.name),
+      {
+        type: contentType,
+        lastModified:
+          file.lastModified
+      }
+    );
+  }
+
+  async function uploadToR2(
+    file,
+    uploadType
+  ) {
+    validateAudioFile(
+      file,
+      uploadType
+    );
+
+    const contentType =
+      getContentType(file);
+
+    if (!contentType) {
+      throw new Error(
+        `The file type could not be determined for ${file.name}.`
+      );
+    }
+
+    /*
+      Request a short-lived upload URL from the secured
+      server endpoint.
+
+      The server receives the intended file role and
+      exact browser-reported file size.
+    */
+    const authorizationResponse =
+      await fetch('/api/upload', {
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json'
+        },
+
+        body: JSON.stringify({
+          filename:
+            file.name,
+
+          contentType,
+
+          uploadType,
+
+          fileSize:
+            file.size
+        })
+      });
+
+    const authorizationBody =
+      await authorizationResponse
+        .json()
+        .catch(() => null);
+
+    if (
+      !authorizationResponse.ok
+    ) {
+      throw new Error(
+        authorizationBody?.error ||
+          `Failed to authorize the upload for ${file.name}.`
+      );
+    }
+
+    const uploadUrl =
+      authorizationBody?.uploadUrl;
+
+    const fileKey =
+      authorizationBody?.fileKey;
+
+    const uploadHeaders =
+      authorizationBody?.uploadHeaders;
 
     if (!uploadUrl || !fileKey) {
       throw new Error(
@@ -56,13 +321,67 @@ export default function UploadBeatPage() {
       );
     }
 
-    const uploadResult = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': contentType
-      },
-      body: file
-    });
+    if (
+      !uploadHeaders ||
+      typeof uploadHeaders !== 'object' ||
+      Array.isArray(uploadHeaders)
+    ) {
+      throw new Error(
+        `The required signed upload headers are missing for ${file.name}.`
+      );
+    }
+
+    const requiredHeaderNames = [
+      'Content-Type',
+      'x-amz-meta-owner',
+      'x-amz-meta-originalfilename',
+      'x-amz-meta-uploadtype',
+      'x-amz-meta-expectedbytes'
+    ];
+
+    const hasAllRequiredHeaders =
+      requiredHeaderNames.every(
+        (headerName) =>
+          typeof uploadHeaders[
+            headerName
+          ] === 'string' &&
+          uploadHeaders[
+            headerName
+          ].length > 0
+      );
+
+    if (!hasAllRequiredHeaders) {
+      throw new Error(
+        `One or more signed upload headers are invalid for ${file.name}.`
+      );
+    }
+
+    if (
+      uploadHeaders['Content-Type'] !==
+      contentType
+    ) {
+      throw new Error(
+        `The signed Content-Type does not match ${file.name}.`
+      );
+    }
+
+    /*
+      Upload the actual file directly to private R2 storage.
+
+      Every signed metadata header returned by /api/upload
+      must be included exactly as received. The browser sets
+      Content-Length automatically from the File body.
+    */
+    const uploadResult =
+      await fetch(uploadUrl, {
+        method: 'PUT',
+
+        headers:
+          uploadHeaders,
+
+        body:
+          file
+      });
 
     if (!uploadResult.ok) {
       throw new Error(
@@ -73,53 +392,149 @@ export default function UploadBeatPage() {
     return fileKey;
   }
 
-  function sanitizeFilename(name) {
-    return name.replace(
-      /[^a-zA-Z0-9._-]/g,
-      '_'
-    );
+  async function publishBeat({
+    title,
+    bpm,
+    basicPrice,
+    exclusivePrice,
+    previewKey,
+    masterKey
+  }) {
+    /*
+      The authenticated server route creates the beat and
+      licenses. The browser never supplies a producer ID
+      or writes directly to Supabase.
+    */
+    const response =
+      await fetch(
+        '/api/beats/publish',
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+            title,
+            bpm,
+            basicPrice,
+            exclusivePrice,
+            previewKey,
+            masterKey
+          })
+        }
+      );
+
+    const responseBody =
+      await response
+        .json()
+        .catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(
+        responseBody?.error ||
+          'The beat could not be published.'
+      );
+    }
+
+    if (
+      !responseBody?.success ||
+      !responseBody?.beatId
+    ) {
+      throw new Error(
+        'The publishing server returned an invalid response.'
+      );
+    }
+
+    return responseBody;
   }
 
-  function getFileFormat(file) {
-    const filename = file?.name || '';
-    const extension = filename
-      .split('.')
-      .pop()
-      ?.trim()
-      .toUpperCase();
+  function handlePreviewSelection(
+    event
+  ) {
+    const selectedFile =
+      event.target.files?.[0] ||
+      null;
 
-    if (
-      extension &&
-      extension !== filename.toUpperCase()
-    ) {
-      return extension;
+    if (!selectedFile) {
+      setPreviewFile(null);
+      return;
     }
 
-    const contentType =
-      file?.type?.toLowerCase() || '';
+    try {
+      validateAudioFile(
+        selectedFile,
+        'preview'
+      );
 
-    if (
-      contentType === 'audio/wav' ||
-      contentType === 'audio/x-wav' ||
-      contentType === 'audio/wave'
-    ) {
-      return 'WAV';
+      setPreviewFile(
+        selectedFile
+      );
+
+      setStatusMessage('');
+    } catch (error) {
+      event.target.value = '';
+      setPreviewFile(null);
+
+      setStatusMessage(
+        `❌ ${
+          error instanceof Error
+            ? error.message
+            : 'Invalid preview file.'
+        }`
+      );
+    }
+  }
+
+  function handleMasterSelection(
+    event
+  ) {
+    const selectedFile =
+      event.target.files?.[0] ||
+      null;
+
+    if (!selectedFile) {
+      setUntaggedFile(null);
+      return;
     }
 
-    if (
-      contentType === 'audio/mpeg' ||
-      contentType === 'audio/mp3'
-    ) {
-      return 'MP3';
-    }
+    try {
+      validateAudioFile(
+        selectedFile,
+        'master'
+      );
 
-    return 'AUDIO';
+      setUntaggedFile(
+        selectedFile
+      );
+
+      setStatusMessage('');
+    } catch (error) {
+      event.target.value = '';
+      setUntaggedFile(null);
+
+      setStatusMessage(
+        `❌ ${
+          error instanceof Error
+            ? error.message
+            : 'Invalid master file.'
+        }`
+      );
+    }
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (!previewFile || !untaggedFile) {
+    const form =
+      event.currentTarget;
+
+    if (
+      !previewFile ||
+      !untaggedFile
+    ) {
       setStatusMessage(
         '❌ Please select both a preview track and an untagged master track.'
       );
@@ -127,13 +542,19 @@ export default function UploadBeatPage() {
       return;
     }
 
-    const trimmedTitle = title.trim();
-    const basicPrice = Number(priceBasic);
-    const exclusivePrice = Number(priceExclusive);
+    const trimmedTitle =
+      title.trim();
 
-    const parsedBpm = bpm
-      ? Number.parseInt(bpm, 10)
-      : null;
+    const basicPrice =
+      Number(priceBasic);
+
+    const exclusivePrice =
+      Number(priceExclusive);
+
+    const parsedBpm =
+      bpm.trim() === ''
+        ? null
+        : Number(bpm);
 
     if (!trimmedTitle) {
       setStatusMessage(
@@ -144,7 +565,19 @@ export default function UploadBeatPage() {
     }
 
     if (
-      !Number.isFinite(basicPrice) ||
+      trimmedTitle.length > 120
+    ) {
+      setStatusMessage(
+        '❌ The beat title cannot exceed 120 characters.'
+      );
+
+      return;
+    }
+
+    if (
+      !Number.isFinite(
+        basicPrice
+      ) ||
       basicPrice <= 0
     ) {
       setStatusMessage(
@@ -155,7 +588,9 @@ export default function UploadBeatPage() {
     }
 
     if (
-      !Number.isFinite(exclusivePrice) ||
+      !Number.isFinite(
+        exclusivePrice
+      ) ||
       exclusivePrice <= 0
     ) {
       setStatusMessage(
@@ -166,149 +601,95 @@ export default function UploadBeatPage() {
     }
 
     if (
-      parsedBpm !== null &&
-      (!Number.isInteger(parsedBpm) ||
-        parsedBpm <= 0)
+      exclusivePrice <=
+      basicPrice
     ) {
       setStatusMessage(
-        '❌ Please enter a valid BPM value.'
+        '❌ The Exclusive license price must be greater than the Basic license price.'
       );
 
       return;
     }
 
-    let createdBeatId = null;
+    if (
+      parsedBpm !== null &&
+      (
+        !Number.isInteger(
+          parsedBpm
+        ) ||
+        parsedBpm < 1 ||
+        parsedBpm > 400
+      )
+    ) {
+      setStatusMessage(
+        '❌ BPM must be a whole number between 1 and 400.'
+      );
+
+      return;
+    }
 
     try {
       setUploading(true);
 
       setStatusMessage(
-        '🔐 Checking your account...'
+        '🔐 Validating the selected audio files...'
       );
 
-      const {
-        data: { user },
-        error: authError
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        throw new Error(
-          'You must be signed in to publish beats.'
+      const cleanPreviewFile =
+        createCleanFile(
+          previewFile,
+          'preview'
         );
-      }
 
-      const cleanPreviewFile = new File(
-        [previewFile],
-        sanitizeFilename(previewFile.name),
-        {
-          type:
-            previewFile.type ||
-            'audio/mpeg'
-        }
-      );
-
-      const cleanUntaggedFile = new File(
-        [untaggedFile],
-        sanitizeFilename(untaggedFile.name),
-        {
-          type:
-            untaggedFile.type ||
-            'application/octet-stream'
-        }
-      );
-
-      const previewFormat =
-        getFileFormat(cleanPreviewFile);
-
-      const masterFormat =
-        getFileFormat(cleanUntaggedFile);
+      const cleanMasterFile =
+        createCleanFile(
+          untaggedFile,
+          'master'
+        );
 
       setStatusMessage(
         '📤 Uploading tracks securely to Cloudflare R2...'
       );
 
-      const [previewKey, untaggedKey] =
-        await Promise.all([
-          uploadToR2(cleanPreviewFile),
-          uploadToR2(cleanUntaggedFile)
-        ]);
+      const [
+        previewKey,
+        masterKey
+      ] = await Promise.all([
+        uploadToR2(
+          cleanPreviewFile,
+          'preview'
+        ),
+
+        uploadToR2(
+          cleanMasterFile,
+          'master'
+        )
+      ]);
 
       setStatusMessage(
-        '💾 Saving the beat to the marketplace...'
+        '💾 Publishing the beat through the secured server...'
       );
 
-      const {
-        data: createdBeat,
-        error: beatInsertError
-      } = await supabase
-        .from('beats')
-        .insert({
-          title: trimmedTitle,
-          bpm: parsedBpm,
-          preview_url: previewKey,
-          untagged_file_key: untaggedKey,
-          producer_id: user.id
-        })
-        .select('id')
-        .single();
+      await publishBeat({
+        title:
+          trimmedTitle,
 
-      if (beatInsertError || !createdBeat) {
-        throw new Error(
-          beatInsertError?.message ||
-            'The beat could not be saved.'
-        );
-      }
+        bpm:
+          parsedBpm,
 
-      createdBeatId = createdBeat.id;
+        basicPrice:
+          basicPrice.toFixed(2),
 
-      const { error: licensesInsertError } =
-        await supabase
-          .from('licenses')
-          .insert([
-            {
-              beat_id: createdBeat.id,
-              name: 'Basic',
-              price: basicPrice.toFixed(2),
-              file_format:
-                previewFormat === 'AUDIO'
-                  ? 'MP3'
-                  : previewFormat,
-              is_exclusive: false
-            },
-            {
-              beat_id: createdBeat.id,
-              name: 'Exclusive',
-              price:
-                exclusivePrice.toFixed(2),
-              file_format: masterFormat,
-              is_exclusive: true
-            }
-          ]);
+        exclusivePrice:
+          exclusivePrice.toFixed(2),
 
-      if (licensesInsertError) {
-        const { error: beatDeleteError } =
-          await supabase
-            .from('beats')
-            .delete()
-            .eq('id', createdBeat.id);
+        previewKey,
 
-        if (beatDeleteError) {
-          console.error(
-            'Incomplete beat cleanup failed:',
-            beatDeleteError
-          );
-        }
-
-        createdBeatId = null;
-
-        throw new Error(
-          licensesInsertError.message ||
-            'The beat licenses could not be saved.'
-        );
-      }
+        masterKey
+      });
 
       setStatusMessage(
-        '🎉 Success! The beat and its licenses were published.'
+        '🎉 Success! The beat and its licenses were published securely.'
       );
 
       setTitle('');
@@ -317,26 +698,13 @@ export default function UploadBeatPage() {
       setPriceExclusive('199.99');
       setPreviewFile(null);
       setUntaggedFile(null);
+
+      form.reset();
     } catch (error) {
       console.error(
         'Beat upload error:',
         error
       );
-
-      if (createdBeatId) {
-        const { error: cleanupError } =
-          await supabase
-            .from('beats')
-            .delete()
-            .eq('id', createdBeatId);
-
-        if (cleanupError) {
-          console.error(
-            'Beat cleanup failed:',
-            cleanupError
-          );
-        }
-      }
 
       setStatusMessage(
         `❌ Error processing upload: ${
@@ -359,7 +727,9 @@ export default function UploadBeatPage() {
         fontFamily: 'sans-serif'
       }}
     >
-      <h1>Upload Your New Beat</h1>
+      <h1>
+        Upload Your New Beat
+      </h1>
 
       <form
         onSubmit={handleSubmit}
@@ -370,13 +740,18 @@ export default function UploadBeatPage() {
         }}
       >
         <label>
-          <strong>Beat Title *</strong>
+          <strong>
+            Beat Title *
+          </strong>
 
           <input
             type="text"
             value={title}
+            maxLength={120}
             onChange={(event) =>
-              setTitle(event.target.value)
+              setTitle(
+                event.target.value
+              )
             }
             required
             disabled={uploading}
@@ -389,14 +764,20 @@ export default function UploadBeatPage() {
         </label>
 
         <label>
-          <strong>BPM</strong>
+          <strong>
+            BPM
+          </strong>
 
           <input
             type="number"
             min="1"
+            max="400"
+            step="1"
             value={bpm}
             onChange={(event) =>
-              setBpm(event.target.value)
+              setBpm(
+                event.target.value
+              )
             }
             disabled={uploading}
             style={{
@@ -413,7 +794,11 @@ export default function UploadBeatPage() {
             gap: '10px'
           }}
         >
-          <label style={{ flex: 1 }}>
+          <label
+            style={{
+              flex: 1
+            }}
+          >
             <strong>
               Basic License Price ($) *
             </strong>
@@ -421,6 +806,7 @@ export default function UploadBeatPage() {
             <input
               type="number"
               min="0.01"
+              max="1000000"
               step="0.01"
               value={priceBasic}
               onChange={(event) =>
@@ -438,7 +824,11 @@ export default function UploadBeatPage() {
             />
           </label>
 
-          <label style={{ flex: 1 }}>
+          <label
+            style={{
+              flex: 1
+            }}
+          >
             <strong>
               Exclusive License Price ($) *
             </strong>
@@ -446,8 +836,11 @@ export default function UploadBeatPage() {
             <input
               type="number"
               min="0.01"
+              max="1000000"
               step="0.01"
-              value={priceExclusive}
+              value={
+                priceExclusive
+              }
               onChange={(event) =>
                 setPriceExclusive(
                   event.target.value
@@ -466,17 +859,15 @@ export default function UploadBeatPage() {
 
         <label>
           <strong>
-            Streaming Preview Track (Tagged MP3) *
+            Streaming Preview Track
+            (Tagged MP3, maximum 25 MB) *
           </strong>
 
           <input
             type="file"
-            accept="audio/mp3,audio/mpeg"
-            onChange={(event) =>
-              setPreviewFile(
-                event.target.files?.[0] ||
-                  null
-              )
+            accept=".mp3,audio/mp3,audio/mpeg"
+            onChange={
+              handlePreviewSelection
             }
             required
             disabled={uploading}
@@ -489,17 +880,16 @@ export default function UploadBeatPage() {
 
         <label>
           <strong>
-            Master Audio Track (Untagged WAV/MP3) *
+            Master Audio Track
+            (Untagged MP3/WAV/FLAC,
+            maximum 250 MB) *
           </strong>
 
           <input
             type="file"
-            accept="audio/*"
-            onChange={(event) =>
-              setUntaggedFile(
-                event.target.files?.[0] ||
-                  null
-              )
+            accept=".mp3,.wav,.flac,audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/flac,audio/x-flac"
+            onChange={
+              handleMasterSelection
             }
             required
             disabled={uploading}
@@ -519,15 +909,22 @@ export default function UploadBeatPage() {
             color: '#fff',
             border: 'none',
             borderRadius: '4px',
-            cursor: uploading
-              ? 'not-allowed'
-              : 'pointer',
+
+            cursor:
+              uploading
+                ? 'not-allowed'
+                : 'pointer',
+
             fontWeight: 'bold',
-            opacity: uploading ? 0.7 : 1
+
+            opacity:
+              uploading
+                ? 0.7
+                : 1
           }}
         >
           {uploading
-            ? 'Processing Storage Pipelines...'
+            ? 'Processing Secure Upload...'
             : 'Publish Beat to Marketplace'}
         </button>
       </form>
