@@ -89,16 +89,18 @@ export default function Navbar() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      const currentUser = session?.user ?? null;
+    } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        const currentUser = session?.user ?? null;
 
-      if (!isMounted) {
-        return;
+        if (!isMounted) {
+          return;
+        }
+
+        setUser(currentUser);
+        void loadProducerStatus(currentUser);
       }
-
-      setUser(currentUser);
-      void loadProducerStatus(currentUser);
-    });
+    );
 
     return () => {
       isMounted = false;
@@ -171,6 +173,16 @@ export default function Navbar() {
               }}
             >
               Dashboard
+            </Link>
+
+            <Link
+              href="/library"
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+              }}
+            >
+              Library
             </Link>
 
             {isProducer && (
