@@ -6,6 +6,14 @@ import { createClient } from '@/lib/supabase-client';
 import { signOutAction } from '@/app/actions';
 import { useCart } from '@/context/CartContext';
 
+function isMissingSessionError(error) {
+  return (
+    error?.name === 'AuthSessionMissingError' ||
+    error?.message === 'Auth session missing!' ||
+    error?.code === 'session_not_found'
+  );
+}
+
 export default function Navbar() {
   const [user, setUser] = useState(null);
   const [isProducer, setIsProducer] = useState(false);
@@ -61,7 +69,13 @@ export default function Navbar() {
       }
 
       if (userError) {
-        console.error('Navbar user loading error:', userError);
+        if (!isMissingSessionError(userError)) {
+          console.error(
+            'Navbar user loading error:',
+            userError
+          );
+        }
+
         setUser(null);
         setIsProducer(false);
         return;
