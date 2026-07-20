@@ -243,6 +243,46 @@ export async function POST(request) {
       );
     }
 
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabase
+      .from("profiles")
+      .select("is_producer")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error(
+        "Upload producer authorization error:",
+        profileError
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Your producer permissions could not be verified.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    if (!profile?.is_producer) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Only producer accounts can upload beats.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
     const requestBody =
       await request.json();
 

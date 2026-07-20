@@ -1,11 +1,8 @@
 import Link from 'next/link';
 
-import {
-  login,
-  requestPasswordReset,
-} from '../auth/actions';
+import { signup } from '../auth/actions';
 
-export default async function LoginPage({
+export default async function RegisterPage({
   searchParams,
 }) {
   const params = await searchParams;
@@ -13,11 +10,6 @@ export default async function LoginPage({
   const error =
     typeof params?.error === 'string'
       ? params.error
-      : null;
-
-  const message =
-    typeof params?.message === 'string'
-      ? params.message
       : null;
 
   return (
@@ -34,7 +26,7 @@ export default async function LoginPage({
       <div
         style={{
           width: '100%',
-          maxWidth: '400px',
+          maxWidth: '420px',
           padding: '25px',
           fontFamily: 'sans-serif',
           border: '1px solid #ddd',
@@ -46,13 +38,25 @@ export default async function LoginPage({
       >
         <h1
           style={{
-            margin: '0 0 20px',
+            margin: '0 0 10px',
             textAlign: 'center',
             fontSize: '28px',
           }}
         >
-          Sign In to BeatMarket
+          Create Your Account
         </h1>
+
+        <p
+          style={{
+            margin: '0 0 22px',
+            textAlign: 'center',
+            color: '#555',
+            lineHeight: 1.5,
+          }}
+        >
+          Buy beats, manage your purchases, and activate producer
+          features whenever you are ready to start selling.
+        </p>
 
         {error && (
           <p
@@ -71,24 +75,8 @@ export default async function LoginPage({
           </p>
         )}
 
-        {message && (
-          <p
-            role="status"
-            style={{
-              margin: '0 0 18px',
-              padding: '10px',
-              color: '#166534',
-              background: '#dcfce7',
-              borderRadius: '4px',
-              textAlign: 'center',
-              fontWeight: 'bold',
-            }}
-          >
-            ℹ️ {message}
-          </p>
-        )}
-
         <form
+          action={signup}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -122,7 +110,30 @@ export default async function LoginPage({
             <input
               name="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
+              minLength={8}
+              required
+              style={{
+                width: '100%',
+                padding: '10px',
+                marginTop: '5px',
+                border: '1px solid #bbb',
+                borderRadius: '4px',
+                background: '#fff',
+                color: '#111',
+                boxSizing: 'border-box',
+              }}
+            />
+          </label>
+
+          <label>
+            <strong>Confirm Password</strong>
+
+            <input
+              name="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
               required
               style={{
                 width: '100%',
@@ -139,30 +150,11 @@ export default async function LoginPage({
 
           <button
             type="submit"
-            formAction={requestPasswordReset}
-            formNoValidate
-            style={{
-              alignSelf: 'flex-end',
-              padding: 0,
-              border: 'none',
-              background: 'none',
-              color: '#0070f3',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              fontSize: '14px',
-            }}
-          >
-            Forgot password?
-          </button>
-
-          <button
-            type="submit"
-            formAction={login}
             style={{
               width: '100%',
               padding: '12px',
               marginTop: '5px',
-              background: '#0070f3',
+              background: '#333',
               color: '#fff',
               border: 'none',
               borderRadius: '4px',
@@ -171,7 +163,7 @@ export default async function LoginPage({
               fontSize: '16px',
             }}
           >
-            Sign In
+            Create Account
           </button>
         </form>
 
@@ -189,24 +181,17 @@ export default async function LoginPage({
               color: '#555',
             }}
           >
-            Don&apos;t have an account?
+            Already have an account?
           </p>
 
           <Link
-            href="/register"
+            href="/login"
             style={{
-              display: 'inline-block',
-              width: '100%',
-              padding: '12px',
-              background: '#333',
-              color: '#fff',
-              borderRadius: '4px',
-              textDecoration: 'none',
+              color: '#0070f3',
               fontWeight: 'bold',
-              boxSizing: 'border-box',
             }}
           >
-            Create Account
+            Back to Sign In
           </Link>
         </div>
       </div>
