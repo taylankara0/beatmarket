@@ -646,6 +646,34 @@ async function updateOrderItemTransactions(
   }
 }
 
+async function createProducerEarningsForOrder(
+  supabase,
+  orderId
+) {
+  const {
+    data: insertedCount,
+    error: earningsError
+  } = await supabase.rpc(
+    'create_producer_earnings_for_order',
+    {
+      target_order_id: orderId
+    }
+  );
+
+  if (earningsError) {
+    console.error(
+      'Producer earnings ledger creation error:',
+      earningsError
+    );
+
+    throw new Error(
+      'The payment was verified, but the producer earnings ledger could not be created.'
+    );
+  }
+
+  return Number(insertedCount || 0);
+}
+
 export async function POST(request) {
   let supabase;
   let order = null;
@@ -747,6 +775,16 @@ export async function POST(request) {
       or charged/granted again.
     */
     if (order.status === 'paid') {
+      /*
+        Recover a missing ledger entry if an earlier callback
+        marked the order paid but stopped before recording
+        producer earnings.
+      */
+      await createProducerEarningsForOrder(
+        supabase,
+        order.id
+      );
+
       return createRedirect(
         request,
         '/payment/success',
@@ -1071,6 +1109,15 @@ export async function POST(request) {
         paymentResult.itemTransactions
       );
 
+      /*
+        The database function is idempotent because each
+        order item can have only one producer earnings row.
+      */
+      await createProducerEarningsForOrder(
+        supabase,
+        concurrentlyPaidOrder.id
+      );
+
       return createRedirect(
         request,
         '/payment/success',
@@ -1088,6 +1135,15 @@ export async function POST(request) {
       supabase,
       paidOrder.id,
       paymentResult.itemTransactions
+    );
+
+    /*
+      Create one immutable producer earnings entry per paid
+      order item. Repeated callbacks cannot duplicate rows.
+    */
+    await createProducerEarningsForOrder(
+      supabase,
+      paidOrder.id
     );
 
     /*

@@ -337,6 +337,20 @@ async function loadTrustedCartItems(
       };
     }
 
+    const trustedProducerId =
+      toNullableString(
+        databaseBeat.producer_id
+      );
+
+    if (!trustedProducerId) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          'One or more selected beats have invalid producer ownership information.',
+      };
+    }
+
     const databasePrice = Number(
       databaseLicense.price
     );
@@ -371,6 +385,7 @@ async function loadTrustedCartItems(
       iyzicoItemId: `item_${requestedItem.index}`,
       beatId: String(databaseBeat.id),
       licenseId: String(databaseLicense.id),
+      producerId: trustedProducerId,
       title: trustedTitle,
       licenseName: trustedLicenseName,
       price: trustedPrice,
@@ -379,6 +394,7 @@ async function loadTrustedCartItems(
       snapshot: {
         beatId: String(databaseBeat.id),
         licenseId: String(databaseLicense.id),
+        producerId: trustedProducerId,
         title: trustedTitle,
         licenseName: trustedLicenseName,
         price: trustedPrice,
@@ -403,6 +419,7 @@ function createCheckoutRequestHash({
     .map((item) => ({
       beatId: item.beatId,
       licenseId: item.licenseId,
+      producerId: item.producerId,
       price: item.price,
       isExclusive: item.isExclusive,
     }))
@@ -1060,6 +1077,7 @@ export async function POST(request) {
           order_id: order.id,
           beat_id: item.beatId,
           license_id: item.licenseId,
+          producer_id: item.producerId,
           title: item.title,
           license_name: item.licenseName,
           price: item.price,
