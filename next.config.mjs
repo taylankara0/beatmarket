@@ -4,10 +4,10 @@ const nextConfig = {
 
   outputFileTracingIncludes: {
     '/api/checkout/iyzico': [
-      './node_modules/iyzipay/lib/resources/**/*',
+      './node_modules/iyzipay/**/*',
     ],
     '/api/checkout/iyzico/callback': [
-      './node_modules/iyzipay/lib/resources/**/*',
+      './node_modules/iyzipay/**/*',
     ],
   },
 };
