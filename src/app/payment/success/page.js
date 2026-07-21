@@ -7,6 +7,7 @@ import {
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
+import ClearCartOnSuccess from './ClearCartOnSuccess';
 import DownloadButton from './DownloadButton';
 
 export const dynamic = 'force-dynamic';
@@ -253,6 +254,8 @@ export default async function PaymentSuccessPage({
           </div>
         ) : (
           <>
+            <ClearCartOnSuccess />
+
             <div className="mt-8 rounded-xl border border-neutral-800 bg-neutral-950 p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
