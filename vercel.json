@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/cleanup-uploads",
       "schedule": "15 3 * * *"
+    },
+    {
+      "path": "/api/internal/release-earnings",
+      "schedule": "30 3 * * *"
     }
   ]
 }
