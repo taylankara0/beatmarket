@@ -9,6 +9,10 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import {
+  createItemFinancialSnapshot,
+} from '../../../../lib/paymentFinancials';
+
+import {
   PAYMENT_MODES,
   getPaymentMode,
 } from '../../../../lib/paymentMode';
@@ -1045,17 +1049,43 @@ export async function POST(request) {
     }
 
     const orderItemRows =
-      normalizedItems.map((item) => ({
-        order_id: order.id,
-        beat_id: item.beatId,
-        license_id: item.licenseId,
-        title: item.title,
-        license_name: item.licenseName,
-        price: item.price,
-        iyzico_item_id:
-          item.iyzicoItemId,
-        item_snapshot: item.snapshot,
-      }));
+      normalizedItems.map((item) => {
+        const financialSnapshot =
+          createItemFinancialSnapshot({
+            grossAmount: item.price,
+            currency: 'TRY',
+          });
+
+        return {
+          order_id: order.id,
+          beat_id: item.beatId,
+          license_id: item.licenseId,
+          title: item.title,
+          license_name: item.licenseName,
+          price: item.price,
+          iyzico_item_id:
+            item.iyzicoItemId,
+          item_snapshot: item.snapshot,
+
+          gross_amount:
+            financialSnapshot.grossAmount,
+
+          platform_fee_amount:
+            financialSnapshot
+              .platformFeeAmount,
+
+          producer_earning_amount:
+            financialSnapshot
+              .producerEarningAmount,
+
+          commission_rate:
+            financialSnapshot
+              .commissionRate,
+
+          currency:
+            financialSnapshot.currency,
+        };
+      });
 
     const { error: orderItemsError } =
       await supabaseAdmin
