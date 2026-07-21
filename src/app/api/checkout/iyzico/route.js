@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import 'postman-request';
 import Iyzipay from 'iyzipay';
 import {
   createClient as createSupabaseAdminClient,

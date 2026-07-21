@@ -1,3 +1,4 @@
+import 'postman-request';
 import Iyzipay from 'iyzipay';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
