@@ -76,6 +76,55 @@ function getOrderFromRelation(orderRelation) {
   return orderRelation ?? null;
 }
 
+function normalizeCurrencyCode(value) {
+  if (
+    typeof value === 'string' &&
+    /^[A-Za-z]{3}$/.test(value.trim())
+  ) {
+    return value.trim().toUpperCase();
+  }
+
+  return 'TRY';
+}
+
+function addCurrencyAmount(
+  totals,
+  currency,
+  amount
+) {
+  const numericAmount = Number(amount);
+
+  if (!Number.isFinite(numericAmount)) {
+    return;
+  }
+
+  const normalizedCurrency =
+    normalizeCurrencyCode(currency);
+
+  const currentTotal =
+    totals.get(normalizedCurrency) ?? 0;
+
+  totals.set(
+    normalizedCurrency,
+    currentTotal + numericAmount
+  );
+}
+
+function formatCurrencyTotals(totals) {
+  if (!(totals instanceof Map) || totals.size === 0) {
+    return formatCurrency(0, 'TRY');
+  }
+
+  return Array.from(totals.entries())
+    .sort(([firstCurrency], [secondCurrency]) =>
+      firstCurrency.localeCompare(secondCurrency)
+    )
+    .map(([currency, total]) =>
+      formatCurrency(total, currency)
+    )
+    .join(' + ');
+}
+
 export default async function DashboardPage({
   searchParams,
 }) {
@@ -288,115 +337,121 @@ export default async function DashboardPage({
   }
 
   const myBeats = myBeatsData ?? [];
-  const producerBeatIds = myBeats.map(
-    (beat) => beat.id
-  );
 
   let paidSales = [];
   let salesErrorMessage = '';
 
   try {
-    if (producerBeatIds.length > 0) {
-      const supabaseAdmin = getSupabaseAdmin();
+    const supabaseAdmin = getSupabaseAdmin();
 
-      const {
-        data: salesData,
-        error: salesError,
-      } = await supabaseAdmin
-        .from('order_items')
-        .select(`
-          id,
-          beat_id,
-          title,
-          license_name,
-          price,
-          iyzico_paid_price,
-          created_at,
-          orders!order_items_order_id_fkey!inner (
-            public_id,
-            status,
-            currency,
-            paid_at
+    const {
+      data: salesData,
+      error: salesError,
+    } = await supabaseAdmin
+      .from('order_items')
+      .select(`
+        id,
+        beat_id,
+        title,
+        license_name,
+        price,
+        gross_amount,
+        iyzico_paid_price,
+        currency,
+        created_at,
+        orders!order_items_order_id_fkey!inner (
+          public_id,
+          status,
+          currency,
+          paid_at
+        )
+      `)
+      .eq('producer_id', user.id)
+      .eq('orders.status', 'paid');
+
+    if (salesError) {
+      console.error(
+        'Producer sales loading error:',
+        salesError
+      );
+
+      salesErrorMessage =
+        'Verified sales could not be loaded.';
+    } else {
+      paidSales = (salesData ?? [])
+        .map((sale) => {
+          const order = getOrderFromRelation(
+            sale.orders
+          );
+
+          if (!order || order.status !== 'paid') {
+            return null;
+          }
+
+          const grossAmount = Number(
+            sale.gross_amount
+          );
+
+          const iyzicoPaidPrice = Number(
+            sale.iyzico_paid_price
+          );
+
+          const listedPrice = Number(sale.price);
+
+          const paidAmount = Number.isFinite(
+            grossAmount
           )
-        `)
-        .in('beat_id', producerBeatIds)
-        .eq('orders.status', 'paid');
-
-      if (salesError) {
-        console.error(
-          'Producer sales loading error:',
-          salesError
-        );
-
-        salesErrorMessage =
-          'Verified sales could not be loaded.';
-      } else {
-        paidSales = (salesData ?? [])
-          .map((sale) => {
-            const order = getOrderFromRelation(
-              sale.orders
-            );
-
-            if (!order || order.status !== 'paid') {
-              return null;
-            }
-
-            const iyzicoPaidPrice = Number(
-              sale.iyzico_paid_price
-            );
-
-            const listedPrice = Number(sale.price);
-
-            const paidAmount = Number.isFinite(
-              iyzicoPaidPrice
-            )
+            ? grossAmount
+            : Number.isFinite(iyzicoPaidPrice)
               ? iyzicoPaidPrice
               : Number.isFinite(listedPrice)
                 ? listedPrice
                 : 0;
 
-            return {
-              id: sale.id,
-              beatId: sale.beat_id,
-              title:
-                sale.title || 'Purchased Beat',
-              licenseName:
-                sale.license_name ||
-                'Purchased License',
-              paidAmount,
-              currency: order.currency || 'TRY',
-              paidAt:
-                order.paid_at ||
-                sale.created_at,
-              orderPublicId:
-                order.public_id || null,
-            };
-          })
-          .filter(Boolean)
-          .sort((firstSale, secondSale) => {
-            const firstTime = new Date(
-              firstSale.paidAt
-            ).getTime();
+          return {
+            id: sale.id,
+            beatId: sale.beat_id,
+            title:
+              sale.title || 'Purchased Beat',
+            licenseName:
+              sale.license_name ||
+              'Purchased License',
+            paidAmount,
+            currency: normalizeCurrencyCode(
+              sale.currency ||
+                order.currency
+            ),
+            paidAt:
+              order.paid_at ||
+              sale.created_at,
+            orderPublicId:
+              order.public_id || null,
+          };
+        })
+        .filter(Boolean)
+        .sort((firstSale, secondSale) => {
+          const firstTime = new Date(
+            firstSale.paidAt
+          ).getTime();
 
-            const secondTime = new Date(
-              secondSale.paidAt
-            ).getTime();
+          const secondTime = new Date(
+            secondSale.paidAt
+          ).getTime();
 
-            const safeFirstTime = Number.isFinite(
-              firstTime
-            )
-              ? firstTime
-              : 0;
+          const safeFirstTime = Number.isFinite(
+            firstTime
+          )
+            ? firstTime
+            : 0;
 
-            const safeSecondTime = Number.isFinite(
-              secondTime
-            )
-              ? secondTime
-              : 0;
+          const safeSecondTime = Number.isFinite(
+            secondTime
+          )
+            ? secondTime
+            : 0;
 
-            return safeSecondTime - safeFirstTime;
-          });
-      }
+          return safeSecondTime - safeFirstTime;
+        });
     }
   } catch (error) {
     console.error(
@@ -408,31 +463,129 @@ export default async function DashboardPage({
       'Verified sales could not be loaded.';
   }
 
-  const grossSalesByCurrency = paidSales.reduce(
-    (totals, sale) => {
-      const currentTotal =
-        totals.get(sale.currency) ?? 0;
+  let producerEarnings = [];
+  let earningsErrorMessage = '';
 
-      totals.set(
-        sale.currency,
-        currentTotal + sale.paidAmount
+  try {
+    const {
+      data: earningsData,
+      error: earningsError,
+    } = await supabase
+      .from('producer_earnings')
+      .select(`
+        producer_earning_amount,
+        currency,
+        status
+      `)
+      .eq('producer_id', user.id);
+
+    if (earningsError) {
+      console.error(
+        'Producer earnings loading error:',
+        earningsError
       );
 
-      return totals;
-    },
-    new Map()
-  );
+      earningsErrorMessage =
+        'Producer earnings could not be loaded.';
+    } else {
+      producerEarnings = (earningsData ?? [])
+        .map((earning) => {
+          const amount = Number(
+            earning.producer_earning_amount
+          );
+
+          return {
+            amount:
+              Number.isFinite(amount)
+                ? amount
+                : 0,
+            currency: normalizeCurrencyCode(
+              earning.currency
+            ),
+            status: earning.status,
+          };
+        });
+    }
+  } catch (error) {
+    console.error(
+      'Producer earnings dashboard error:',
+      error
+    );
+
+    earningsErrorMessage =
+      'Producer earnings could not be loaded.';
+  }
+
+  const grossSalesByCurrency = new Map();
+
+  for (const sale of paidSales) {
+    addCurrencyAmount(
+      grossSalesByCurrency,
+      sale.currency,
+      sale.paidAmount
+    );
+  }
 
   const grossSalesText =
-    grossSalesByCurrency.size > 0
-      ? Array.from(
-          grossSalesByCurrency.entries()
-        )
-          .map(([currency, total]) =>
-            formatCurrency(total, currency)
-          )
-          .join(' + ')
-      : formatCurrency(0, 'TRY');
+    formatCurrencyTotals(
+      grossSalesByCurrency
+    );
+
+  const earningsByStatus = {
+    pending: new Map(),
+    available: new Map(),
+    paid: new Map(),
+    total: new Map(),
+  };
+
+  let reversedEarningsCount = 0;
+
+  for (const earning of producerEarnings) {
+    if (earning.status === 'reversed') {
+      reversedEarningsCount += 1;
+      continue;
+    }
+
+    if (
+      earning.status !== 'pending' &&
+      earning.status !== 'available' &&
+      earning.status !== 'paid'
+    ) {
+      continue;
+    }
+
+    addCurrencyAmount(
+      earningsByStatus[earning.status],
+      earning.currency,
+      earning.amount
+    );
+
+    addCurrencyAmount(
+      earningsByStatus.total,
+      earning.currency,
+      earning.amount
+    );
+  }
+
+  const totalEarningsText =
+    formatCurrencyTotals(
+      earningsByStatus.total
+    );
+
+  const pendingEarningsText =
+    formatCurrencyTotals(
+      earningsByStatus.pending
+    );
+
+  const availableEarningsText =
+    formatCurrencyTotals(
+      earningsByStatus.available
+    );
+
+  const paidEarningsText =
+    formatCurrencyTotals(
+      earningsByStatus.paid
+    );
 
   const uniqueBeatsSold = new Set(
     paidSales.map((sale) => sale.beatId)
@@ -476,7 +629,7 @@ export default async function DashboardPage({
             }}
           >
             Manage your catalog and review verified
-            marketplace sales.
+            marketplace sales and earnings.
           </p>
         </div>
 
@@ -841,6 +994,247 @@ export default async function DashboardPage({
                   </tbody>
                 </table>
               </div>
+            )}
+          </>
+        )}
+      </section>
+
+      <section
+        style={{
+          marginBottom: '40px',
+        }}
+      >
+        <div
+          style={{
+            marginBottom: '20px',
+          }}
+        >
+          <h2
+            style={{
+              margin: '0 0 6px 0',
+              fontSize: '1.5rem',
+            }}
+          >
+            Earnings Overview
+          </h2>
+
+          <p
+            style={{
+              margin: 0,
+              color: '#666',
+              lineHeight: 1.5,
+            }}
+          >
+            Producer earnings are calculated after the
+            10% marketplace commission. New earnings remain
+            pending for seven days before becoming available.
+          </p>
+        </div>
+
+        {earningsErrorMessage ? (
+          <div
+            style={{
+              padding: '16px',
+              border: '1px solid #fecdca',
+              borderRadius: '8px',
+              background: '#fef3f2',
+              color: '#b42318',
+            }}
+          >
+            {earningsErrorMessage}
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '16px',
+              }}
+            >
+              <div
+                style={{
+                  padding: '20px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  background: '#fff',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 8px 0',
+                    color: '#666',
+                    fontSize: '14px',
+                  }}
+                >
+                  Total Earnings
+                </p>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#111',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {totalEarningsText}
+                </p>
+
+                <p
+                  style={{
+                    margin: '8px 0 0 0',
+                    color: '#888',
+                    fontSize: '12px',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Pending, available, and paid earnings
+                  combined.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  padding: '20px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  background: '#fff',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 8px 0',
+                    color: '#666',
+                    fontSize: '14px',
+                  }}
+                >
+                  Pending
+                </p>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#b54708',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {pendingEarningsText}
+                </p>
+
+                <p
+                  style={{
+                    margin: '8px 0 0 0',
+                    color: '#888',
+                    fontSize: '12px',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Still inside the seven-day hold period.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  padding: '20px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  background: '#fff',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 8px 0',
+                    color: '#666',
+                    fontSize: '14px',
+                  }}
+                >
+                  Available
+                </p>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#067647',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {availableEarningsText}
+                </p>
+
+                <p
+                  style={{
+                    margin: '8px 0 0 0',
+                    color: '#888',
+                    fontSize: '12px',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Hold completed and eligible for payout.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  padding: '20px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  background: '#fff',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 8px 0',
+                    color: '#666',
+                    fontSize: '14px',
+                  }}
+                >
+                  Paid Out
+                </p>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#175cd3',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {paidEarningsText}
+                </p>
+
+                <p
+                  style={{
+                    margin: '8px 0 0 0',
+                    color: '#888',
+                    fontSize: '12px',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Earnings recorded as paid to you.
+                </p>
+              </div>
+            </div>
+
+            {reversedEarningsCount > 0 && (
+              <p
+                style={{
+                  margin: '14px 0 0 0',
+                  color: '#b42318',
+                  fontSize: '13px',
+                  lineHeight: 1.5,
+                }}
+              >
+                {reversedEarningsCount}{' '}
+                reversed earning
+                {reversedEarningsCount === 1
+                  ? ''
+                  : 's'}{' '}
+                excluded from these totals.
+              </p>
             )}
           </>
         )}
