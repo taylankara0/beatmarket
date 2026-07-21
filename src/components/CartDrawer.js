@@ -1,7 +1,14 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import { useCart } from '@/context/CartContext';
+import {
+  useEffect,
+  useRef,
+  useState
+} from 'react';
+
+import {
+  useCart
+} from '@/context/CartContext';
 
 const CHECKOUT_ATTEMPT_STORAGE_KEY =
   'beatmarket_checkout_attempt';
@@ -28,7 +35,10 @@ function createIdempotencyKey() {
 
   const hexadecimalBytes = Array.from(
     randomBytes,
-    (byte) => byte.toString(16).padStart(2, '0')
+    (byte) =>
+      byte
+        .toString(16)
+        .padStart(2, '0')
   );
 
   return [
@@ -68,7 +78,9 @@ function createCartFingerprint(cart) {
       const secondKey =
         `${secondItem.beatId}:${secondItem.licenseId}`;
 
-      return firstKey.localeCompare(secondKey);
+      return firstKey.localeCompare(
+        secondKey
+      );
     });
 
   return JSON.stringify(normalizedItems);
@@ -84,7 +96,10 @@ function removeStoredCheckoutAttempt() {
       CHECKOUT_ATTEMPT_STORAGE_KEY
     );
   } catch {
-    // Checkout can continue even when sessionStorage is unavailable.
+    /*
+      Checkout can continue even when
+      sessionStorage is unavailable.
+    */
   }
 }
 
@@ -140,7 +155,10 @@ function getCheckoutIdempotencyKey(cart) {
         })
       );
     } catch {
-      // The request can still use the in-memory key.
+      /*
+        The request can still use the
+        in-memory idempotency key.
+      */
     }
   }
 
@@ -154,6 +172,21 @@ export default function CartDrawer() {
   const [loading, setLoading] =
     useState(false);
 
+  const [
+    paymentModeLoading,
+    setPaymentModeLoading
+  ] = useState(true);
+
+  const [
+    paymentsEnabled,
+    setPaymentsEnabled
+  ] = useState(false);
+
+  const [
+    paymentMode,
+    setPaymentMode
+  ] = useState('disabled');
+
   const checkoutInProgressRef =
     useRef(false);
 
@@ -163,9 +196,100 @@ export default function CartDrawer() {
     cartTotal,
   } = useCart();
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const abortController =
+      new AbortController();
+
+    async function loadPaymentMode() {
+      setPaymentModeLoading(true);
+
+      try {
+        const response = await fetch(
+          '/api/payment-mode',
+          {
+            method: 'GET',
+            cache: 'no-store',
+            signal:
+              abortController.signal,
+          }
+        );
+
+        const data = await response
+          .json()
+          .catch(() => null);
+
+        if (
+          !response.ok ||
+          !data
+        ) {
+          throw new Error(
+            'Payment availability could not be loaded.'
+          );
+        }
+
+        setPaymentMode(
+          typeof data.paymentMode ===
+            'string'
+            ? data.paymentMode
+            : 'disabled'
+        );
+
+        setPaymentsEnabled(
+          data.paymentsEnabled === true
+        );
+      } catch (error) {
+        if (
+          error?.name ===
+          'AbortError'
+        ) {
+          return;
+        }
+
+        console.error(
+          'Payment mode loading error:',
+          error
+        );
+
+        /*
+          Fail closed. A frontend status
+          error must never enable checkout.
+        */
+        setPaymentMode('disabled');
+        setPaymentsEnabled(false);
+      } finally {
+        if (
+          !abortController.signal.aborted
+        ) {
+          setPaymentModeLoading(false);
+        }
+      }
+    }
+
+    loadPaymentMode();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen]);
+
   const handleCheckout = async () => {
     if (cart.length === 0) {
       alert('Sepet boş!');
+      return;
+    }
+
+    if (
+      paymentModeLoading ||
+      !paymentsEnabled
+    ) {
+      alert(
+        'Payments are not currently available.'
+      );
+
       return;
     }
 
@@ -249,11 +373,39 @@ export default function CartDrawer() {
     }
   };
 
+  const checkoutDisabled =
+    loading ||
+    paymentModeLoading ||
+    !paymentsEnabled ||
+    cart.length === 0;
+
+  let checkoutButtonText =
+    'Iyzico ile Öde';
+
+  if (loading) {
+    checkoutButtonText =
+      'Bağlanıyor...';
+  } else if (paymentModeLoading) {
+    checkoutButtonText =
+      'Ödeme Durumu Kontrol Ediliyor...';
+  } else if (!paymentsEnabled) {
+    checkoutButtonText =
+      'Payments Coming Soon';
+  } else if (
+    paymentMode === 'sandbox'
+  ) {
+    checkoutButtonText =
+      'Iyzico ile Test Ödemesi';
+  }
+
   return (
     <>
       <button
         onClick={() =>
-          setIsOpen((currentValue) => !currentValue)
+          setIsOpen(
+            (currentValue) =>
+              !currentValue
+          )
         }
         style={{
           position: 'fixed',
@@ -284,6 +436,7 @@ export default function CartDrawer() {
             padding: '20px',
             boxShadow:
               '-4px 0 20px rgba(0,0,0,0.1)',
+            overflowY: 'auto',
           }}
         >
           <div
@@ -291,6 +444,7 @@ export default function CartDrawer() {
               display: 'flex',
               justifyContent:
                 'space-between',
+              alignItems: 'center',
             }}
           >
             <h2>Sepetiniz</h2>
@@ -304,50 +458,64 @@ export default function CartDrawer() {
             </button>
           </div>
 
-          {cart.map((item) => (
-            <div
-              key={item.id}
+          {cart.length === 0 ? (
+            <p
               style={{
-                display: 'flex',
-                justifyContent:
-                  'space-between',
-                padding: '10px 0',
-                borderBottom:
-                  '1px solid #eee',
+                marginTop: '20px',
+                color: '#666',
               }}
             >
-              <div>
-                {item.title}
-                <br />
-
-                <small>
-                  {item.licenseType}
-                </small>
-              </div>
-
+              Sepetiniz boş.
+            </p>
+          ) : (
+            cart.map((item) => (
               <div
+                key={item.id}
                 style={{
-                  textAlign: 'right',
+                  display: 'flex',
+                  justifyContent:
+                    'space-between',
+                  padding: '10px 0',
+                  borderBottom:
+                    '1px solid #eee',
                 }}
               >
-                {(Number(item.price) || 0).toFixed(2)}₺
-                <br />
+                <div>
+                  {item.title}
+                  <br />
 
-                <button
-                  onClick={() =>
-                    removeFromCart(item.id)
-                  }
+                  <small>
+                    {item.licenseType}
+                  </small>
+                </div>
+
+                <div
                   style={{
-                    color: 'red',
-                    border: 'none',
-                    background: 'none',
+                    textAlign: 'right',
                   }}
                 >
-                  Sil
-                </button>
+                  {(Number(item.price) || 0).toFixed(2)}₺
+                  <br />
+
+                  <button
+                    onClick={() =>
+                      removeFromCart(
+                        item.id
+                      )
+                    }
+                    style={{
+                      color: 'red',
+                      border: 'none',
+                      background: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Sil
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
 
           <div
             style={{
@@ -359,25 +527,71 @@ export default function CartDrawer() {
             {(Number(cartTotal) || 0).toFixed(2)}₺
           </div>
 
+          {!paymentModeLoading &&
+            !paymentsEnabled && (
+              <div
+                style={{
+                  marginTop: '14px',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  fontSize: '14px',
+                  lineHeight: 1.5,
+                }}
+              >
+                Payments are currently
+                disabled. You can still
+                review and manage your cart.
+              </div>
+            )}
+
+          {!paymentModeLoading &&
+            paymentsEnabled &&
+            paymentMode ===
+              'sandbox' && (
+              <div
+                style={{
+                  marginTop: '14px',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  background: '#dbeafe',
+                  color: '#1e40af',
+                  fontSize: '14px',
+                  lineHeight: 1.5,
+                }}
+              >
+                Test payment mode is active.
+                No real payment will be
+                processed.
+              </div>
+            )}
+
           <button
             onClick={handleCheckout}
-            disabled={loading}
+            disabled={checkoutDisabled}
             style={{
               width: '100%',
-              background: '#22c55e',
+              background:
+                checkoutDisabled
+                  ? '#9ca3af'
+                  : '#22c55e',
               color: '#fff',
               padding: '10px',
               marginTop: '10px',
+              border: 'none',
               borderRadius: '5px',
-              cursor: loading
-                ? 'not-allowed'
-                : 'pointer',
-              opacity: loading ? 0.7 : 1,
+              cursor:
+                checkoutDisabled
+                  ? 'not-allowed'
+                  : 'pointer',
+              opacity:
+                checkoutDisabled
+                  ? 0.75
+                  : 1,
             }}
           >
-            {loading
-              ? 'Bağlanıyor...'
-              : 'Iyzico ile Öde'}
+            {checkoutButtonText}
           </button>
         </div>
       )}
