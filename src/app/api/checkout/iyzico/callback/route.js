@@ -3,6 +3,11 @@ import Iyzipay from 'iyzipay';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
+import {
+  PAYMENT_MODES,
+  getPaymentMode
+} from '../../../../../lib/paymentMode';
+
 export const runtime = 'nodejs';
 
 const iyzipay = new Iyzipay({
@@ -646,6 +651,9 @@ export async function POST(request) {
   let order = null;
 
   try {
+    const paymentMode =
+      getPaymentMode();
+
     supabase =
       getSupabaseAdmin();
 
@@ -713,10 +721,22 @@ export async function POST(request) {
         request,
         '/explore',
         {
-          payment: 'error'
+          payment:
+            paymentMode ===
+            PAYMENT_MODES.DISABLED
+              ? 'disabled'
+              : 'error'
         }
       );
     }
+
+    /*
+      A callback for an existing order must still be processed
+      when payments were disabled after checkout began.
+
+      This prevents a valid in-flight payment from being left
+      unfinished during a controlled payment-mode change.
+    */
 
     order = existingOrder;
 

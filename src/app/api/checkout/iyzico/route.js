@@ -8,6 +8,11 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+import {
+  PAYMENT_MODES,
+  getPaymentMode,
+} from '../../../../lib/paymentMode';
+
 export const runtime = 'nodejs';
 
 const EXCLUSIVE_RESERVATION_TTL_MINUTES = 60;
@@ -700,6 +705,28 @@ export async function POST(request) {
   let createdOrderId = null;
 
   try {
+    const paymentMode = getPaymentMode();
+
+    if (
+      paymentMode ===
+      PAYMENT_MODES.DISABLED
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Payments are not currently available.',
+          paymentMode,
+        },
+        {
+          status: 503,
+          headers: {
+            'Cache-Control': 'no-store',
+          },
+        }
+      );
+    }
+
     const supabaseAuth =
       await getSupabaseAuthClient();
 
