@@ -7,6 +7,11 @@ import {
 
 import { createClient } from '@/lib/supabase-server';
 import { activateProducerProfile } from './actions';
+import {
+  cancelProducerPayout,
+  requestProducerPayout,
+  saveProducerPayoutAccount,
+} from './payout-actions';
 
 function getSupabaseAdmin() {
   const supabaseUrl =
@@ -66,6 +71,68 @@ function formatDate(value) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date);
+}
+
+function maskIban(value) {
+  if (typeof value !== 'string') {
+    return '-';
+  }
+
+  const normalizedIban = value
+    .replace(/\s+/g, '')
+    .toUpperCase();
+
+  if (!/^TR[0-9]{24}$/.test(normalizedIban)) {
+    return '-';
+  }
+
+  return `${normalizedIban.slice(0, 4)} •••• •••• •••• •••• ${normalizedIban.slice(-4)}`;
+}
+
+function getPayoutStatusPresentation(status) {
+  switch (status) {
+    case 'requested':
+      return {
+        label: 'Requested',
+        background: '#fff7ed',
+        color: '#c2410c',
+      };
+
+    case 'approved':
+      return {
+        label: 'Approved',
+        background: '#eff6ff',
+        color: '#1d4ed8',
+      };
+
+    case 'paid':
+      return {
+        label: 'Paid',
+        background: '#ecfdf3',
+        color: '#067647',
+      };
+
+    case 'rejected':
+      return {
+        label: 'Rejected',
+        background: '#fef3f2',
+        color: '#b42318',
+      };
+
+    case 'cancelled':
+      return {
+        label: 'Cancelled',
+        background: '#f2f4f7',
+        color: '#475467',
+      };
+
+    default:
+      return {
+        label: 'Unknown',
+        background: '#f2f4f7',
+        color: '#475467',
+      };
+  }
 }
 
 function getOrderFromRelation(orderRelation) {
@@ -516,6 +583,103 @@ export default async function DashboardPage({
       'Producer earnings could not be loaded.';
   }
 
+  let payoutAccount = null;
+  let payoutRequests = [];
+  let payoutErrorMessage = '';
+
+  try {
+    const [
+      payoutAccountResult,
+      payoutRequestsResult,
+    ] = await Promise.all([
+      supabase
+        .from('producer_payout_accounts')
+        .select(`
+          id,
+          account_holder_name,
+          iban,
+          currency,
+          updated_at
+        `)
+        .eq('producer_id', user.id)
+        .maybeSingle(),
+
+      supabase
+        .from('payout_requests')
+        .select(`
+          id,
+          requested_amount,
+          currency,
+          status,
+          account_holder_name_snapshot,
+          iban_snapshot,
+          approved_at,
+          paid_at,
+          rejected_at,
+          cancelled_at,
+          rejection_reason,
+          bank_transfer_reference,
+          created_at,
+          updated_at
+        `)
+        .eq('producer_id', user.id)
+        .order('created_at', {
+          ascending: false,
+        })
+        .limit(20),
+    ]);
+
+    if (payoutAccountResult.error) {
+      console.error(
+        'Producer payout account loading error:',
+        payoutAccountResult.error
+      );
+
+      payoutErrorMessage =
+        'Your payout account could not be loaded.';
+    } else {
+      payoutAccount = payoutAccountResult.data ?? null;
+    }
+
+    if (payoutRequestsResult.error) {
+      console.error(
+        'Producer payout requests loading error:',
+        payoutRequestsResult.error
+      );
+
+      payoutErrorMessage = payoutErrorMessage
+        ? `${payoutErrorMessage} Your payout history could not be loaded.`
+        : 'Your payout history could not be loaded.';
+    } else {
+      payoutRequests = (
+        payoutRequestsResult.data ?? []
+      ).map((request) => {
+        const requestedAmount = Number(
+          request.requested_amount
+        );
+
+        return {
+          ...request,
+          requested_amount:
+            Number.isFinite(requestedAmount)
+              ? requestedAmount
+              : 0,
+          currency: normalizeCurrencyCode(
+            request.currency
+          ),
+        };
+      });
+    }
+  } catch (error) {
+    console.error(
+      'Producer payout dashboard error:',
+      error
+    );
+
+    payoutErrorMessage =
+      'Payout information could not be loaded.';
+  }
+
   const grossSalesByCurrency = new Map();
 
   for (const sale of paidSales) {
@@ -534,6 +698,7 @@ export default async function DashboardPage({
   const earningsByStatus = {
     pending: new Map(),
     available: new Map(),
+    reserved: new Map(),
     paid: new Map(),
     total: new Map(),
   };
@@ -549,6 +714,7 @@ export default async function DashboardPage({
     if (
       earning.status !== 'pending' &&
       earning.status !== 'available' &&
+      earning.status !== 'reserved' &&
       earning.status !== 'paid'
     ) {
       continue;
@@ -582,10 +748,30 @@ export default async function DashboardPage({
       earningsByStatus.available
     );
 
+  const reservedEarningsText =
+    formatCurrencyTotals(
+      earningsByStatus.reserved
+    );
+
   const paidEarningsText =
     formatCurrencyTotals(
       earningsByStatus.paid
     );
+
+  const availableTryAmount =
+    earningsByStatus.available.get('TRY') ?? 0;
+
+  const activePayoutRequest =
+    payoutRequests.find((request) =>
+      request.status === 'requested' ||
+      request.status === 'approved'
+    ) ?? null;
+
+  const canRequestPayout =
+    payoutAccount !== null &&
+    activePayoutRequest === null &&
+    availableTryAmount >= 200 &&
+    !payoutErrorMessage;
 
   const uniqueBeatsSold = new Set(
     paidSales.map((sale) => sale.beatId)
@@ -1090,8 +1276,8 @@ export default async function DashboardPage({
                     lineHeight: 1.4,
                   }}
                 >
-                  Pending, available, and paid earnings
-                  combined.
+                  Pending, available, reserved, and paid
+                  earnings combined.
                 </p>
               </div>
 
@@ -1192,6 +1378,47 @@ export default async function DashboardPage({
                     fontSize: '14px',
                   }}
                 >
+                  Reserved
+                </p>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#7f56d9',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {reservedEarningsText}
+                </p>
+
+                <p
+                  style={{
+                    margin: '8px 0 0 0',
+                    color: '#888',
+                    fontSize: '12px',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Included in an active payout request.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  padding: '20px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  background: '#fff',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 8px 0',
+                    color: '#666',
+                    fontSize: '14px',
+                  }}
+                >
                   Paid Out
                 </p>
 
@@ -1237,6 +1464,638 @@ export default async function DashboardPage({
               </p>
             )}
           </>
+        )}
+      </section>
+
+      <section
+        style={{
+          marginBottom: '40px',
+        }}
+      >
+        <div
+          style={{
+            marginBottom: '20px',
+          }}
+        >
+          <h2
+            style={{
+              margin: '0 0 6px 0',
+              fontSize: '1.5rem',
+            }}
+          >
+            Producer Payouts
+          </h2>
+
+          <p
+            style={{
+              margin: 0,
+              color: '#666',
+              lineHeight: 1.5,
+            }}
+          >
+            Save a Turkish IBAN and request all available TRY
+            earnings when your balance reaches the ₺200 minimum.
+          </p>
+        </div>
+
+        {payoutErrorMessage && (
+          <div
+            style={{
+              marginBottom: '20px',
+              padding: '16px',
+              border: '1px solid #fecdca',
+              borderRadius: '8px',
+              background: '#fef3f2',
+              color: '#b42318',
+            }}
+          >
+            {payoutErrorMessage}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: '20px',
+            marginBottom: '24px',
+          }}
+        >
+          <div
+            style={{
+              padding: '24px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              background: '#fff',
+            }}
+          >
+            <h3
+              style={{
+                margin: '0 0 8px 0',
+                fontSize: '1.1rem',
+              }}
+            >
+              Payout Account
+            </h3>
+
+            <p
+              style={{
+                margin: '0 0 20px 0',
+                color: '#666',
+                fontSize: '14px',
+                lineHeight: 1.5,
+              }}
+            >
+              Your full IBAN is never displayed after saving.
+              Enter both fields whenever you save changes.
+            </p>
+
+            {payoutAccount && (
+              <div
+                style={{
+                  marginBottom: '20px',
+                  padding: '14px',
+                  border: '1px solid #d1fadf',
+                  borderRadius: '8px',
+                  background: '#ecfdf3',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 6px 0',
+                    color: '#067647',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  Account saved
+                </p>
+
+                <p
+                  style={{
+                    margin: '0 0 4px 0',
+                    color: '#344054',
+                    fontSize: '14px',
+                  }}
+                >
+                  {payoutAccount.account_holder_name}
+                </p>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#344054',
+                    fontFamily: 'monospace',
+                    fontSize: '13px',
+                  }}
+                >
+                  {maskIban(payoutAccount.iban)}
+                </p>
+              </div>
+            )}
+
+            <form action={saveProducerPayoutAccount}>
+              <label
+                htmlFor="account_holder_name"
+                style={{
+                  display: 'block',
+                  marginBottom: '6px',
+                  color: '#344054',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                }}
+              >
+                Account Holder Name
+              </label>
+
+              <input
+                id="account_holder_name"
+                name="account_holder_name"
+                type="text"
+                required
+                minLength={2}
+                maxLength={120}
+                defaultValue={
+                  payoutAccount?.account_holder_name ?? ''
+                }
+                autoComplete="name"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  marginBottom: '16px',
+                  padding: '11px 12px',
+                  border: '1px solid #d0d5dd',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                }}
+              />
+
+              <label
+                htmlFor="iban"
+                style={{
+                  display: 'block',
+                  marginBottom: '6px',
+                  color: '#344054',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                }}
+              >
+                Turkish IBAN
+              </label>
+
+              <input
+                id="iban"
+                name="iban"
+                type="text"
+                required
+                placeholder="TR00 0000 0000 0000 0000 0000 00"
+                autoComplete="off"
+                inputMode="text"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  marginBottom: '16px',
+                  padding: '11px 12px',
+                  border: '1px solid #d0d5dd',
+                  borderRadius: '8px',
+                  fontFamily: 'monospace',
+                  fontSize: '14px',
+                  textTransform: 'uppercase',
+                }}
+              />
+
+              <button
+                type="submit"
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '11px 16px',
+                  background: '#111827',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                }}
+              >
+                {payoutAccount
+                  ? 'Update Payout Account'
+                  : 'Save Payout Account'}
+              </button>
+            </form>
+          </div>
+
+          <div
+            style={{
+              padding: '24px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              background: '#fff',
+            }}
+          >
+            <h3
+              style={{
+                margin: '0 0 8px 0',
+                fontSize: '1.1rem',
+              }}
+            >
+              Request Payout
+            </h3>
+
+            <p
+              style={{
+                margin: '0 0 20px 0',
+                color: '#666',
+                fontSize: '14px',
+                lineHeight: 1.5,
+              }}
+            >
+              A request includes all currently available TRY
+              earnings. Requested earnings remain reserved until
+              the request is paid, rejected, or cancelled.
+            </p>
+
+            <div
+              style={{
+                marginBottom: '18px',
+                padding: '18px',
+                border: '1px solid #e5e7eb',
+                borderRadius: '10px',
+                background: '#f9fafb',
+              }}
+            >
+              <p
+                style={{
+                  margin: '0 0 6px 0',
+                  color: '#667085',
+                  fontSize: '13px',
+                }}
+              >
+                Available to request
+              </p>
+
+              <p
+                style={{
+                  margin: 0,
+                  color: '#067647',
+                  fontSize: '28px',
+                  fontWeight: 'bold',
+                }}
+              >
+                {formatCurrency(
+                  availableTryAmount,
+                  'TRY'
+                )}
+              </p>
+            </div>
+
+            {activePayoutRequest ? (
+              <div
+                style={{
+                  padding: '16px',
+                  border: '1px solid #fedf89',
+                  borderRadius: '8px',
+                  background: '#fffaeb',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 6px 0',
+                    color: '#b54708',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  Active payout request
+                </p>
+
+                <p
+                  style={{
+                    margin: '0 0 12px 0',
+                    color: '#7a2e0e',
+                    fontSize: '14px',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {formatCurrency(
+                    activePayoutRequest.requested_amount,
+                    activePayoutRequest.currency
+                  )}{' '}
+                  is currently{' '}
+                  {
+                    getPayoutStatusPresentation(
+                      activePayoutRequest.status
+                    ).label.toLowerCase()
+                  }.
+                </p>
+
+                {activePayoutRequest.status ===
+                  'requested' && (
+                  <form action={cancelProducerPayout}>
+                    <input
+                      type="hidden"
+                      name="payout_request_id"
+                      value={activePayoutRequest.id}
+                    />
+
+                    <button
+                      type="submit"
+                      style={{
+                        border: '1px solid #f04438',
+                        borderRadius: '8px',
+                        padding: '9px 14px',
+                        background: '#fff',
+                        color: '#b42318',
+                        fontSize: '14px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel Request
+                    </button>
+                  </form>
+                )}
+              </div>
+            ) : (
+              <form action={requestProducerPayout}>
+                <button
+                  type="submit"
+                  disabled={!canRequestPayout}
+                  style={{
+                    width: '100%',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    background: canRequestPayout
+                      ? '#0070f3'
+                      : '#d0d5dd',
+                    color: '#fff',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    cursor: canRequestPayout
+                      ? 'pointer'
+                      : 'not-allowed',
+                  }}
+                >
+                  Request Full Available Balance
+                </button>
+              </form>
+            )}
+
+            {!payoutAccount && (
+              <p
+                style={{
+                  margin: '12px 0 0 0',
+                  color: '#b54708',
+                  fontSize: '13px',
+                  lineHeight: 1.5,
+                }}
+              >
+                Save a payout account before requesting a payout.
+              </p>
+            )}
+
+            {payoutAccount &&
+              !activePayoutRequest &&
+              availableTryAmount < 200 && (
+                <p
+                  style={{
+                    margin: '12px 0 0 0',
+                    color: '#667085',
+                    fontSize: '13px',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  You need at least ₺200 in available earnings
+                  before requesting a payout.
+                </p>
+              )}
+          </div>
+        </div>
+
+        <h3
+          style={{
+            margin: '0 0 16px 0',
+            fontSize: '1.15rem',
+          }}
+        >
+          Payout History
+        </h3>
+
+        {payoutRequests.length === 0 ? (
+          <div
+            style={{
+              padding: '30px',
+              border: '1px dashed #ccc',
+              borderRadius: '8px',
+              background: '#fff',
+              textAlign: 'center',
+              color: '#666',
+            }}
+          >
+            No payout requests have been recorded yet.
+          </div>
+        ) : (
+          <div
+            style={{
+              overflowX: 'auto',
+              border: '1px solid #eee',
+              borderRadius: '8px',
+              background: '#fff',
+            }}
+          >
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                textAlign: 'left',
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    background: '#f5f5f7',
+                    borderBottom: '1px solid #eee',
+                  }}
+                >
+                  <th style={{ padding: '14px' }}>
+                    Requested
+                  </th>
+
+                  <th style={{ padding: '14px' }}>
+                    Amount
+                  </th>
+
+                  <th style={{ padding: '14px' }}>
+                    Status
+                  </th>
+
+                  <th style={{ padding: '14px' }}>
+                    Destination
+                  </th>
+
+                  <th style={{ padding: '14px' }}>
+                    Details
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {payoutRequests.map((request) => {
+                  const presentation =
+                    getPayoutStatusPresentation(
+                      request.status
+                    );
+
+                  return (
+                    <tr
+                      key={request.id}
+                      style={{
+                        borderBottom:
+                          '1px solid #eee',
+                      }}
+                    >
+                      <td
+                        style={{
+                          padding: '14px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {formatDate(request.created_at)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: '14px',
+                          color: '#111',
+                          fontWeight: 'bold',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {formatCurrency(
+                          request.requested_amount,
+                          request.currency
+                        )}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: '14px',
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '5px 9px',
+                            borderRadius: '999px',
+                            background:
+                              presentation.background,
+                            color: presentation.color,
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {presentation.label}
+                        </span>
+                      </td>
+
+                      <td
+                        style={{
+                          padding: '14px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            marginBottom: '4px',
+                            fontSize: '13px',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {
+                            request.account_holder_name_snapshot
+                          }
+                        </div>
+
+                        <div
+                          style={{
+                            color: '#667085',
+                            fontFamily: 'monospace',
+                            fontSize: '12px',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {maskIban(
+                            request.iban_snapshot
+                          )}
+                        </div>
+                      </td>
+
+                      <td
+                        style={{
+                          padding: '14px',
+                          color: '#667085',
+                          fontSize: '13px',
+                          lineHeight: 1.5,
+                          minWidth: '220px',
+                        }}
+                      >
+                        {request.status === 'paid' && (
+                          <>
+                            Paid:{' '}
+                            {formatDate(request.paid_at)}
+                            <br />
+                            Transfer reference:{' '}
+                            {request.bank_transfer_reference ||
+                              '-'}
+                          </>
+                        )}
+
+                        {request.status ===
+                          'rejected' && (
+                          <>
+                            Rejected:{' '}
+                            {formatDate(
+                              request.rejected_at
+                            )}
+                            <br />
+                            Reason:{' '}
+                            {request.rejection_reason ||
+                              '-'}
+                          </>
+                        )}
+
+                        {request.status ===
+                          'cancelled' && (
+                          <>
+                            Cancelled:{' '}
+                            {formatDate(
+                              request.cancelled_at
+                            )}
+                          </>
+                        )}
+
+                        {request.status ===
+                          'approved' && (
+                          <>
+                            Approved:{' '}
+                            {formatDate(
+                              request.approved_at
+                            )}
+                          </>
+                        )}
+
+                        {request.status ===
+                          'requested' && (
+                          <>
+                            Awaiting platform review.
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 
