@@ -224,6 +224,7 @@ export async function GET(
       Verify that:
       - the order exists,
       - the payment is complete,
+      - the order has not been refunded,
       - the current user owns it.
     */
     const {
@@ -234,7 +235,8 @@ export async function GET(
       .select(`
         id,
         user_id,
-        status
+        status,
+        refunded_at
       `)
       .eq('id', orderItem.order_id)
       .maybeSingle();
@@ -258,6 +260,19 @@ export async function GET(
         },
         {
           status: 404
+        }
+      );
+    }
+
+    if (order.status === 'refunded') {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'This purchase has been refunded, so its files are no longer available for download.'
+        },
+        {
+          status: 403
         }
       );
     }
