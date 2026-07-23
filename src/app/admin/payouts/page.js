@@ -176,8 +176,11 @@ export default async function AdminPayoutsPage({
       account_holder_name_snapshot,
       iban_snapshot,
       approved_at,
+      approved_by,
       paid_at,
+      paid_by,
       rejected_at,
+      rejected_by,
       cancelled_at,
       rejection_reason,
       bank_transfer_reference,
@@ -567,6 +570,11 @@ export default async function AdminPayoutsPage({
             {payoutRequests.map((request) => {
               const presentation =
                 getStatusPresentation(request.status);
+
+              const hasAuditInformation =
+                Boolean(request.approved_by) ||
+                Boolean(request.rejected_by) ||
+                Boolean(request.paid_by);
 
               return (
                 <article
@@ -968,6 +976,60 @@ export default async function AdminPayoutsPage({
                     >
                       Cancelled at:{' '}
                       {formatDate(request.cancelled_at)}
+                    </div>
+                  )}
+
+                  {hasAuditInformation && (
+                    <div
+                      style={{
+                        marginTop: '16px',
+                        padding: '14px',
+                        border: '1px solid #d6bbfb',
+                        borderRadius: '8px',
+                        background: '#f9f5ff',
+                        color: '#53389e',
+                        fontSize: '13px',
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      <div
+                        style={{
+                          marginBottom: '6px',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        Administrator Audit Trail
+                      </div>
+
+                      {request.approved_by && (
+                        <div
+                          style={{
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          Approved by: {request.approved_by}
+                        </div>
+                      )}
+
+                      {request.rejected_by && (
+                        <div
+                          style={{
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          Rejected by: {request.rejected_by}
+                        </div>
+                      )}
+
+                      {request.paid_by && (
+                        <div
+                          style={{
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          Paid by: {request.paid_by}
+                        </div>
+                      )}
                     </div>
                   )}
                 </article>
