@@ -769,6 +769,21 @@ export async function POST(request) {
     order = existingOrder;
 
     /*
+      A refunded order is terminal. A delayed or repeated
+      Iyzico callback must never turn it back into a paid order
+      or recreate producer earnings.
+    */
+    if (order.status === 'refunded') {
+      return createRedirect(
+        request,
+        '/explore',
+        {
+          payment: 'refunded'
+        }
+      );
+    }
+
+    /*
       Iyzico may send the same callback multiple times.
 
       A previously verified paid order must not be modified
@@ -864,7 +879,11 @@ export async function POST(request) {
             new Date().toISOString()
         })
         .eq('id', order.id)
-        .neq('status', 'paid');
+        .not(
+          'status',
+          'in',
+          '("paid","refunded")'
+        );
 
       if (failedUpdateError) {
         console.error(
@@ -932,7 +951,11 @@ export async function POST(request) {
             new Date().toISOString()
         })
         .eq('id', order.id)
-        .neq('status', 'paid');
+        .not(
+          'status',
+          'in',
+          '("paid","refunded")'
+        );
 
       if (
         verificationUpdateError
@@ -1014,7 +1037,11 @@ export async function POST(request) {
           paidAt
       })
       .eq('id', order.id)
-      .neq('status', 'paid')
+      .not(
+        'status',
+        'in',
+        '("paid","refunded")'
+      )
       .select('id, public_id')
       .maybeSingle();
 
@@ -1061,6 +1088,19 @@ export async function POST(request) {
 
         throw new Error(
           'The completed order could not be re-read.'
+        );
+      }
+
+      if (
+        concurrentlyPaidOrder?.status ===
+          'refunded'
+      ) {
+        return createRedirect(
+          request,
+          '/explore',
+          {
+            payment: 'refunded'
+          }
         );
       }
 
@@ -1193,7 +1233,11 @@ export async function POST(request) {
             new Date().toISOString()
         })
         .eq('id', order.id)
-        .neq('status', 'paid');
+        .not(
+          'status',
+          'in',
+          '("paid","refunded")'
+        );
 
       if (callbackUpdateError) {
         console.error(
