@@ -18,6 +18,7 @@ export const runtime = "nodejs";
 const MEGABYTE = 1024 * 1024;
 const UPLOAD_RATE_LIMIT_MAX_REQUESTS = 20;
 const UPLOAD_RATE_LIMIT_WINDOW_SECONDS = 60;
+const MAX_UPLOAD_AUTH_REQUEST_BODY_BYTES = 16 * 1024;
 
 const UPLOAD_POLICIES = {
   preview: {
@@ -122,6 +123,203 @@ async function getSupabaseAuthClient() {
       },
     }
   );
+}
+
+function createJsonResponse(
+  body,
+  init = {}
+) {
+  const headers =
+    new Headers(init.headers);
+
+  headers.set(
+    "Cache-Control",
+    "no-store"
+  );
+
+  return NextResponse.json(
+    body,
+    {
+      ...init,
+      headers,
+    }
+  );
+}
+
+async function readJsonBodyWithLimit(
+  request
+) {
+  const contentTypeHeader =
+    request.headers.get(
+      "content-type"
+    );
+
+  if (
+    contentTypeHeader &&
+    normalizeContentType(
+      contentTypeHeader
+    ) !== "application/json"
+  ) {
+    return {
+      success: false,
+      status: 415,
+      error:
+        "The upload authorization request must use application/json.",
+    };
+  }
+
+  const contentLengthHeader =
+    request.headers.get(
+      "content-length"
+    );
+
+  if (contentLengthHeader) {
+    const normalizedContentLength =
+      contentLengthHeader.trim();
+
+    if (
+      !/^\d+$/.test(
+        normalizedContentLength
+      )
+    ) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          "The upload authorization request body length is invalid.",
+      };
+    }
+
+    const declaredContentLength =
+      Number(
+        normalizedContentLength
+      );
+
+    if (
+      !Number.isSafeInteger(
+        declaredContentLength
+      )
+    ) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          "The upload authorization request body length is invalid.",
+      };
+    }
+
+    if (
+      declaredContentLength >
+      MAX_UPLOAD_AUTH_REQUEST_BODY_BYTES
+    ) {
+      return {
+        success: false,
+        status: 413,
+        error:
+          "The upload authorization request body is too large.",
+      };
+    }
+  }
+
+  if (!request.body) {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The upload authorization request body is invalid.",
+    };
+  }
+
+  const reader =
+    request.body.getReader();
+
+  const decoder =
+    new TextDecoder(
+      "utf-8",
+      {
+        fatal: true,
+      }
+    );
+
+  let totalBytes = 0;
+  let bodyText = "";
+
+  try {
+    while (true) {
+      const {
+        done,
+        value,
+      } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      totalBytes +=
+        value.byteLength;
+
+      if (
+        totalBytes >
+        MAX_UPLOAD_AUTH_REQUEST_BODY_BYTES
+      ) {
+        try {
+          await reader.cancel();
+        } catch {
+          /*
+            The request is already being rejected, so a
+            cancellation error does not change the response.
+          */
+        }
+
+        return {
+          success: false,
+          status: 413,
+          error:
+            "The upload authorization request body is too large.",
+        };
+      }
+
+      bodyText += decoder.decode(
+        value,
+        {
+          stream: true,
+        }
+      );
+    }
+
+    bodyText += decoder.decode();
+  } catch {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The upload authorization request body is invalid.",
+    };
+  }
+
+  if (!bodyText.trim()) {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The upload authorization request body is invalid.",
+    };
+  }
+
+  try {
+    return {
+      success: true,
+      body:
+        JSON.parse(bodyText),
+    };
+  } catch {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The upload authorization request body is invalid.",
+    };
+  }
 }
 
 function normalizeContentType(contentType) {
@@ -265,7 +463,7 @@ export async function POST(request) {
         authError
       );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -292,7 +490,7 @@ export async function POST(request) {
         profileError
       );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -305,7 +503,7 @@ export async function POST(request) {
     }
 
     if (!profile?.is_producer) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -332,7 +530,7 @@ export async function POST(request) {
       });
 
     if (!rateLimitResult.allowed) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -353,8 +551,27 @@ export async function POST(request) {
       );
     }
 
+    const requestBodyResult =
+      await readJsonBodyWithLimit(
+        request
+      );
+
+    if (!requestBodyResult.success) {
+      return createJsonResponse(
+        {
+          success: false,
+          error:
+            requestBodyResult.error,
+        },
+        {
+          status:
+            requestBodyResult.status,
+        }
+      );
+    }
+
     const requestBody =
-      await request.json();
+      requestBodyResult.body;
 
     const filename =
       requestBody?.filename;
@@ -378,7 +595,7 @@ export async function POST(request) {
       typeof uploadType !== "string" ||
       !Number.isSafeInteger(fileSize)
     ) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -394,7 +611,7 @@ export async function POST(request) {
       UPLOAD_POLICIES[uploadType];
 
     if (!uploadPolicy) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -407,7 +624,7 @@ export async function POST(request) {
     }
 
     if (fileSize <= 0) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -428,7 +645,7 @@ export async function POST(request) {
           uploadPolicy.maximumBytes
         );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -444,7 +661,7 @@ export async function POST(request) {
       getSafeFilename(filename);
 
     if (!safeFilename) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -471,7 +688,7 @@ export async function POST(request) {
           ? "The preview track must be an MP3 file."
           : "The master track must be an MP3, WAV, or FLAC file.";
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
           error:
@@ -586,7 +803,7 @@ export async function POST(request) {
         }
       );
 
-    return NextResponse.json({
+    return createJsonResponse({
       success: true,
 
       uploadUrl,
@@ -607,7 +824,7 @@ export async function POST(request) {
       error
     );
 
-    return NextResponse.json(
+    return createJsonResponse(
       {
         success: false,
         error:
