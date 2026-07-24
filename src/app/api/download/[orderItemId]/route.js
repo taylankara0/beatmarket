@@ -7,9 +7,18 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+import {
+  consumeApiRateLimit
+} from '@/lib/apiRateLimit';
 import { r2Client } from '@/lib/r2';
 
 export const runtime = 'nodejs';
+
+const DOWNLOAD_RATE_LIMIT_MAX_REQUESTS = 20;
+const DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS = 60;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function getSupabaseAdmin() {
   const supabaseUrl =
@@ -134,16 +143,23 @@ export async function GET(
     const resolvedParams = await params;
 
     const orderItemId =
-      resolvedParams?.orderItemId;
+      resolvedParams?.orderItemId?.trim();
 
-    if (!orderItemId) {
+    if (
+      !orderItemId ||
+      !UUID_PATTERN.test(orderItemId)
+    ) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Order item ID is missing.'
+          error:
+            'A valid order item ID is required.'
         },
         {
-          status: 400
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -170,13 +186,50 @@ export async function GET(
             'You must be signed in to download this purchase.'
         },
         {
-          status: 401
+          status: 401,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
 
     const supabaseAdmin =
       getSupabaseAdmin();
+
+    const rateLimitResult =
+      await consumeApiRateLimit({
+        supabaseAdmin,
+        rateKey:
+          `download:user:${user.id}`,
+        maxRequests:
+          DOWNLOAD_RATE_LIMIT_MAX_REQUESTS,
+        windowSeconds:
+          DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS
+      });
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Too many download requests. Please wait before trying again.'
+        },
+        {
+          status: 429,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Retry-After': String(
+              Math.max(
+                1,
+                rateLimitResult
+                  .retryAfterSeconds
+              )
+            )
+          }
+        }
+      );
+    }
 
     /*
       Load the purchased order item.
@@ -215,7 +268,10 @@ export async function GET(
           error: 'Purchased item not found.'
         },
         {
-          status: 404
+          status: 404,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -259,7 +315,10 @@ export async function GET(
           error: 'Order not found.'
         },
         {
-          status: 404
+          status: 404,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -272,7 +331,10 @@ export async function GET(
             'This purchase has been refunded, so its files are no longer available for download.'
         },
         {
-          status: 403
+          status: 403,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -285,7 +347,10 @@ export async function GET(
             'This order has not been paid successfully.'
         },
         {
-          status: 403
+          status: 403,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -302,7 +367,10 @@ export async function GET(
             'You do not have permission to download this purchase.'
         },
         {
-          status: 403
+          status: 403,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -318,7 +386,10 @@ export async function GET(
             'The purchased beat or license information is missing.'
         },
         {
-          status: 400
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -362,7 +433,10 @@ export async function GET(
             'The purchased license could not be verified.'
         },
         {
-          status: 404
+          status: 404,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -404,7 +478,10 @@ export async function GET(
             'The master audio file is not available.'
         },
         {
-          status: 404
+          status: 404,
+          headers: {
+            'Cache-Control': 'no-store'
+          }
         }
       );
     }
@@ -461,12 +538,19 @@ export async function GET(
       }
     );
 
-    return NextResponse.json({
-      success: true,
-      downloadUrl,
-      filename,
-      expiresIn: 60
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        downloadUrl,
+        filename,
+        expiresIn: 60
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store'
+        }
+      }
+    );
   } catch (error) {
     console.error(
       'Secure download error:',
@@ -480,7 +564,10 @@ export async function GET(
           'The secure download link could not be generated.'
       },
       {
-        status: 500
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-store'
+        }
       }
     );
   }
