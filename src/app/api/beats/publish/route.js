@@ -13,11 +13,17 @@ import {
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import {
+  consumeApiRateLimit
+} from "@/lib/apiRateLimit";
 import { r2Client } from "@/lib/r2";
 
 export const runtime = "nodejs";
 
 const MEGABYTE = 1024 * 1024;
+
+const PUBLISH_RATE_LIMIT_MAX_REQUESTS = 10;
+const PUBLISH_RATE_LIMIT_WINDOW_SECONDS = 60;
 
 const MAX_TITLE_LENGTH = 120;
 const MAX_PRICE = 1000000;
@@ -650,6 +656,51 @@ export async function POST(request) {
       );
     }
 
+    const supabaseAdmin =
+      getSupabaseAdmin();
+
+    const rateLimitResult =
+      await consumeApiRateLimit({
+        supabaseAdmin,
+
+        rateKey:
+          `publish:user:${user.id}`,
+
+        maxRequests:
+          PUBLISH_RATE_LIMIT_MAX_REQUESTS,
+
+        windowSeconds:
+          PUBLISH_RATE_LIMIT_WINDOW_SECONDS
+      });
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            "Too many beat publishing requests. Please wait before trying again."
+        },
+        {
+          status: 429,
+
+          headers: {
+            "Cache-Control":
+              "no-store",
+
+            "Retry-After":
+              String(
+                Math.max(
+                  1,
+                  rateLimitResult
+                    .retryAfterSeconds
+                )
+              )
+          }
+        }
+      );
+    }
+
     const requestBody =
       await request.json();
 
@@ -917,9 +968,6 @@ export async function POST(request) {
         }
       );
     }
-
-    const supabaseAdmin =
-      getSupabaseAdmin();
 
     /*
       producer_id comes only from the authenticated
