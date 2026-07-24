@@ -25,6 +25,7 @@ export const runtime = 'nodejs';
 
 const CHECKOUT_RATE_LIMIT_MAX_REQUESTS = 10;
 const CHECKOUT_RATE_LIMIT_WINDOW_SECONDS = 60;
+const MAX_CHECKOUT_REQUEST_BODY_BYTES = 64 * 1024;
 const EXCLUSIVE_RESERVATION_TTL_MINUTES = 60;
 const MAX_CART_ITEMS = 50;
 
@@ -144,6 +145,168 @@ function normalizeIdempotencyKey(value) {
   }
 
   return normalizedValue;
+}
+
+async function readJsonBodyWithLimit(request) {
+  const contentType =
+    request.headers.get('content-type');
+
+  if (
+    contentType &&
+    !contentType
+      .toLowerCase()
+      .startsWith('application/json')
+  ) {
+    return {
+      success: false,
+      status: 415,
+      error:
+        'The checkout request must use application/json.',
+    };
+  }
+
+  const contentLengthHeader =
+    request.headers.get('content-length');
+
+  if (contentLengthHeader) {
+    const normalizedContentLength =
+      contentLengthHeader.trim();
+
+    if (
+      !/^\d+$/.test(
+        normalizedContentLength
+      )
+    ) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          'The checkout request body length is invalid.',
+      };
+    }
+
+    const declaredContentLength =
+      Number(normalizedContentLength);
+
+    if (
+      !Number.isSafeInteger(
+        declaredContentLength
+      )
+    ) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          'The checkout request body length is invalid.',
+      };
+    }
+
+    if (
+      declaredContentLength >
+      MAX_CHECKOUT_REQUEST_BODY_BYTES
+    ) {
+      return {
+        success: false,
+        status: 413,
+        error:
+          'The checkout request body is too large.',
+      };
+    }
+  }
+
+  if (!request.body) {
+    return {
+      success: false,
+      status: 400,
+      error:
+        'The checkout request body is invalid.',
+    };
+  }
+
+  const reader =
+    request.body.getReader();
+
+  const decoder =
+    new TextDecoder();
+
+  let totalBytes = 0;
+  let bodyText = '';
+
+  try {
+    while (true) {
+      const {
+        done,
+        value,
+      } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      totalBytes +=
+        value.byteLength;
+
+      if (
+        totalBytes >
+        MAX_CHECKOUT_REQUEST_BODY_BYTES
+      ) {
+        try {
+          await reader.cancel();
+        } catch {
+          /*
+            The request is already being rejected, so a
+            cancellation error does not change the response.
+          */
+        }
+
+        return {
+          success: false,
+          status: 413,
+          error:
+            'The checkout request body is too large.',
+        };
+      }
+
+      bodyText += decoder.decode(
+        value,
+        {
+          stream: true,
+        }
+      );
+    }
+
+    bodyText += decoder.decode();
+  } catch {
+    return {
+      success: false,
+      status: 400,
+      error:
+        'The checkout request body is invalid.',
+    };
+  }
+
+  if (!bodyText.trim()) {
+    return {
+      success: false,
+      status: 400,
+      error:
+        'The checkout request body is invalid.',
+    };
+  }
+
+  try {
+    return {
+      success: true,
+      body: JSON.parse(bodyText),
+    };
+  } catch {
+    return {
+      success: false,
+      status: 400,
+      error:
+        'The checkout request body is invalid.',
+    };
+  }
 }
 
 function getBuyerIdentity(user) {
@@ -814,22 +977,30 @@ export async function POST(request) {
       );
     }
 
-    let requestBody;
+    const requestBodyResult =
+      await readJsonBodyWithLimit(
+        request
+      );
 
-    try {
-      requestBody = await request.json();
-    } catch {
+    if (!requestBodyResult.success) {
       return NextResponse.json(
         {
           success: false,
           error:
-            'The checkout request body is invalid.',
+            requestBodyResult.error,
         },
         {
-          status: 400,
+          status:
+            requestBodyResult.status,
+          headers: {
+            'Cache-Control': 'no-store',
+          },
         }
       );
     }
+
+    const requestBody =
+      requestBodyResult.body;
 
     const items = requestBody?.items;
 
