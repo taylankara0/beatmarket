@@ -9,6 +9,10 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import {
+  consumeApiRateLimit,
+} from '../../../../lib/apiRateLimit';
+
+import {
   createItemFinancialSnapshot,
 } from '../../../../lib/paymentFinancials';
 
@@ -19,6 +23,8 @@ import {
 
 export const runtime = 'nodejs';
 
+const CHECKOUT_RATE_LIMIT_MAX_REQUESTS = 10;
+const CHECKOUT_RATE_LIMIT_WINDOW_SECONDS = 60;
 const EXCLUSIVE_RESERVATION_TTL_MINUTES = 60;
 const MAX_CART_ITEMS = 50;
 
@@ -775,6 +781,38 @@ export async function POST(request) {
     }
 
     supabaseAdmin = getSupabaseAdmin();
+
+    const rateLimitResult =
+      await consumeApiRateLimit({
+        supabaseAdmin,
+        rateKey: `checkout:user:${user.id}`,
+        maxRequests:
+          CHECKOUT_RATE_LIMIT_MAX_REQUESTS,
+        windowSeconds:
+          CHECKOUT_RATE_LIMIT_WINDOW_SECONDS,
+      });
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Too many checkout attempts. Please wait before trying again.',
+        },
+        {
+          status: 429,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Retry-After': String(
+              Math.max(
+                1,
+                rateLimitResult.retryAfterSeconds
+              )
+            ),
+          },
+        }
+      );
+    }
 
     let requestBody;
 
