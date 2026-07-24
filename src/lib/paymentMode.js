@@ -25,24 +25,3 @@ export function getPaymentMode() {
 
   return configuredMode;
 }
-
-export function arePaymentsEnabled() {
-  return (
-    getPaymentMode() !==
-    PAYMENT_MODES.DISABLED
-  );
-}
-
-export function isSandboxPaymentMode() {
-  return (
-    getPaymentMode() ===
-    PAYMENT_MODES.SANDBOX
-  );
-}
-
-export function isLivePaymentMode() {
-  return (
-    getPaymentMode() ===
-    PAYMENT_MODES.LIVE
-  );
-}
