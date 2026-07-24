@@ -7,8 +7,15 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+import {
+  consumeApiRateLimit,
+} from '@/lib/apiRateLimit';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const REFUND_PROCESS_RATE_LIMIT_MAX_REQUESTS = 5;
+const REFUND_PROCESS_RATE_LIMIT_WINDOW_SECONDS = 60;
 
 const iyzipay = new Iyzipay({
   apiKey: process.env.IYZICO_API_KEY,
@@ -528,6 +535,40 @@ export async function POST(
 
     supabaseAdmin =
       getSupabaseAdmin();
+
+    const rateLimitResult =
+      await consumeApiRateLimit({
+        supabaseAdmin,
+        rateKey:
+          `admin-refund-process:user:${user.id}`,
+        maxRequests:
+          REFUND_PROCESS_RATE_LIMIT_MAX_REQUESTS,
+        windowSeconds:
+          REFUND_PROCESS_RATE_LIMIT_WINDOW_SECONDS,
+      });
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Too many refund-processing requests. Please wait before trying again.',
+        },
+        {
+          status: 429,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Retry-After': String(
+              Math.max(
+                1,
+                rateLimitResult
+                  .retryAfterSeconds
+              )
+            ),
+          },
+        }
+      );
+    }
 
     refund = await loadRefund({
       supabaseAdmin,
