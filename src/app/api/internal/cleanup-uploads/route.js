@@ -1,31 +1,47 @@
 import {
   DeleteObjectsCommand,
-  HeadObjectCommand,
-  ListObjectsV2Command,
+  ListObjectsV2Command
 } from "@aws-sdk/client-s3";
 
-import { timingSafeEqual } from "crypto";
-import { NextResponse } from "next/server";
+import {
+  timingSafeEqual
+} from "crypto";
 
 import {
-  createClient as createSupabaseAdminClient,
+  NextResponse
+} from "next/server";
+
+import {
+  createClient as createSupabaseAdminClient
 } from "@supabase/supabase-js";
 
-import { r2Client } from "@/lib/r2";
+import {
+  r2Client
+} from "@/lib/r2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TEMPORARY_PREFIX = "temporary/";
-const MAX_HEAD_CONCURRENCY = 10;
-const DELETE_BATCH_SIZE = 1000;
+const MANAGED_UPLOAD_PREFIX =
+  "masters/";
+
+const DELETE_BATCH_SIZE =
+  1000;
+
+const DATABASE_PAGE_SIZE =
+  1000;
 
 /*
-  Temporary objects normally contain an expiresat metadata
-  value. Objects missing that metadata are deleted only when
-  they are older than this fallback period.
+  Recently uploaded files are not deleted immediately.
+
+  This gives producers enough time to finish publishing
+  a beat after uploading its files.
 */
-const FALLBACK_EXPIRATION_HOURS = 48;
+const ORPHAN_MINIMUM_AGE_HOURS =
+  48;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function getBucketName() {
   const bucketName =
@@ -76,8 +92,8 @@ function getSupabaseAdmin() {
     {
       auth: {
         autoRefreshToken: false,
-        persistSession: false,
-      },
+        persistSession: false
+      }
     }
   );
 }
@@ -99,7 +115,9 @@ function getBearerToken(request) {
 
   const token =
     authorizationHeader
-      .slice("Bearer ".length)
+      .slice(
+        "Bearer ".length
+      )
       .trim();
 
   return token || null;
@@ -119,10 +137,14 @@ function safelyCompareSecrets(
   }
 
   const providedBuffer =
-    Buffer.from(providedSecret);
+    Buffer.from(
+      providedSecret
+    );
 
   const expectedBuffer =
-    Buffer.from(expectedSecret);
+    Buffer.from(
+      expectedSecret
+    );
 
   if (
     providedBuffer.length !==
@@ -150,51 +172,88 @@ function isAuthorized(request) {
   );
 }
 
-function parseIsoDate(value) {
-  if (
-    typeof value !==
-      "string" ||
-    !value.trim()
-  ) {
-    return null;
-  }
-
-  const date =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return null;
-  }
-
-  return date;
-}
-
-function isFallbackExpired(
-  lastModified,
-  currentTime
+function isManagedUploadKey(
+  objectKey
 ) {
-  if (!(lastModified instanceof Date)) {
+  if (
+    typeof objectKey !==
+      "string" ||
+    !objectKey.trim()
+  ) {
     return false;
   }
 
-  const fallbackExpirationTime =
-    lastModified.getTime() +
-    FALLBACK_EXPIRATION_HOURS *
-      60 *
-      60 *
-      1000;
+  const segments =
+    objectKey.split("/");
+
+  /*
+    The secured upload endpoint creates keys using:
+
+    masters/{userId}/{year}/{month}/{uploadType}/{filename}
+  */
+  if (segments.length !== 6) {
+    return false;
+  }
+
+  const [
+    rootDirectory,
+    userId,
+    year,
+    month,
+    uploadType,
+    filename
+  ] = segments;
+
+  if (
+    rootDirectory !==
+      "masters" ||
+    !UUID_PATTERN.test(
+      userId
+    ) ||
+    !/^\d{4}$/.test(
+      year
+    ) ||
+    !/^(0[1-9]|1[0-2])$/.test(
+      month
+    ) ||
+    ![
+      "preview",
+      "master"
+    ].includes(
+      uploadType
+    ) ||
+    !filename
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isOldEnoughForCleanup(
+  lastModified,
+  currentTime
+) {
+  if (
+    !(lastModified instanceof Date)
+  ) {
+    return false;
+  }
+
+  const minimumAgeMilliseconds =
+    ORPHAN_MINIMUM_AGE_HOURS *
+    60 *
+    60 *
+    1000;
 
   return (
-    fallbackExpirationTime <=
+    lastModified.getTime() +
+      minimumAgeMilliseconds <=
     currentTime
   );
 }
 
-async function listTemporaryObjects() {
+async function listManagedUploadObjects() {
   const bucketName =
     getBucketName();
 
@@ -209,10 +268,10 @@ async function listTemporaryObjects() {
             bucketName,
 
           Prefix:
-            TEMPORARY_PREFIX,
+            MANAGED_UPLOAD_PREFIX,
 
           ContinuationToken:
-            continuationToken,
+            continuationToken
         })
       );
 
@@ -235,7 +294,7 @@ async function listTemporaryObjects() {
         size:
           Number(
             object.Size || 0
-          ),
+          )
       });
     }
 
@@ -249,165 +308,184 @@ async function listTemporaryObjects() {
   return objects;
 }
 
-async function inspectTemporaryObject(
-  object
+function addReferencedKey(
+  referencedKeys,
+  value
 ) {
-  const bucketName =
-    getBucketName();
-
-  try {
-    const response =
-      await r2Client.send(
-        new HeadObjectCommand({
-          Bucket:
-            bucketName,
-
-          Key:
-            object.key,
-        })
-      );
-
-    const metadata =
-      response.Metadata || {};
-
-    return {
-      ...object,
-
-      expiresAt:
-        parseIsoDate(
-          metadata.expiresat
-        ),
-
-      uploadState:
-        metadata.uploadstate ||
-        null,
-
-      headError:
-        null,
-    };
-  } catch (error) {
-    return {
-      ...object,
-
-      expiresAt:
-        null,
-
-      uploadState:
-        null,
-
-      headError:
-        error,
-    };
-  }
-}
-
-async function inspectObjectsInBatches(
-  objects
-) {
-  const inspectedObjects = [];
-
-  for (
-    let index = 0;
-    index < objects.length;
-    index += MAX_HEAD_CONCURRENCY
+  if (
+    typeof value !==
+      "string"
   ) {
-    const batch =
-      objects.slice(
-        index,
-        index +
-          MAX_HEAD_CONCURRENCY
-      );
-
-    const batchResults =
-      await Promise.all(
-        batch.map(
-          inspectTemporaryObject
-        )
-      );
-
-    inspectedObjects.push(
-      ...batchResults
-    );
+    return;
   }
 
-  return inspectedObjects;
+  const normalizedValue =
+    value.trim();
+
+  if (!normalizedValue) {
+    return;
+  }
+
+  referencedKeys.add(
+    normalizedValue
+  );
 }
 
-function selectExpiredObjects(
-  inspectedObjects
-) {
-  const currentTime =
-    Date.now();
+async function getReferencedStorageKeys() {
+  const supabaseAdmin =
+    getSupabaseAdmin();
 
-  const expiredObjects = [];
-  const skippedObjects = [];
-  const failedObjects = [];
+  const referencedKeys =
+    new Set();
 
-  for (
-    const object of
-    inspectedObjects
-  ) {
-    if (object.headError) {
-      failedObjects.push({
-        key:
-          object.key,
+  let startIndex = 0;
 
-        reason:
-          object.headError instanceof
-          Error
-            ? object.headError.message
-            : "Object inspection failed.",
-      });
+  while (true) {
+    const endIndex =
+      startIndex +
+      DATABASE_PAGE_SIZE -
+      1;
 
-      continue;
+    const {
+      data: beats,
+      error
+    } = await supabaseAdmin
+      .from("beats")
+      .select(`
+        preview_url,
+        tagged_file_key,
+        untagged_file_key,
+        stems_file_key,
+        cover_art_key
+      `)
+      .range(
+        startIndex,
+        endIndex
+      );
+
+    if (error) {
+      console.error(
+        "Referenced upload lookup error:",
+        error
+      );
+
+      throw new Error(
+        "Published beat files could not be checked before cleanup."
+      );
+    }
+
+    for (
+      const beat of beats || []
+    ) {
+      addReferencedKey(
+        referencedKeys,
+        beat.preview_url
+      );
+
+      addReferencedKey(
+        referencedKeys,
+        beat.tagged_file_key
+      );
+
+      addReferencedKey(
+        referencedKeys,
+        beat.untagged_file_key
+      );
+
+      addReferencedKey(
+        referencedKeys,
+        beat.stems_file_key
+      );
+
+      addReferencedKey(
+        referencedKeys,
+        beat.cover_art_key
+      );
     }
 
     if (
-      object.expiresAt &&
-      object.expiresAt.getTime() <=
-        currentTime
+      !beats ||
+      beats.length <
+        DATABASE_PAGE_SIZE
     ) {
-      expiredObjects.push(
+      break;
+    }
+
+    startIndex +=
+      DATABASE_PAGE_SIZE;
+  }
+
+  return referencedKeys;
+}
+
+function selectOrphanCandidates({
+  listedObjects,
+  referencedKeys
+}) {
+  const currentTime =
+    Date.now();
+
+  const orphanCandidates = [];
+  const referencedObjects = [];
+  const recentObjects = [];
+  const unmanagedObjects = [];
+
+  for (
+    const object of
+    listedObjects
+  ) {
+    if (
+      !isManagedUploadKey(
+        object.key
+      )
+    ) {
+      unmanagedObjects.push(
         object
       );
 
       continue;
     }
 
-    /*
-      Only temporary-state objects are eligible for the
-      LastModified fallback cleanup.
-    */
     if (
-      !object.expiresAt &&
-      object.uploadState ===
-        "temporary" &&
-      isFallbackExpired(
+      referencedKeys.has(
+        object.key
+      )
+    ) {
+      referencedObjects.push(
+        object
+      );
+
+      continue;
+    }
+
+    if (
+      !isOldEnoughForCleanup(
         object.lastModified,
         currentTime
       )
     ) {
-      expiredObjects.push(
+      recentObjects.push(
         object
       );
 
       continue;
     }
 
-    skippedObjects.push(
+    orphanCandidates.push(
       object
     );
   }
 
   return {
-    expiredObjects,
-    skippedObjects,
-    failedObjects,
+    orphanCandidates,
+    referencedObjects,
+    recentObjects,
+    unmanagedObjects
   };
 }
 
-async function deleteExpiredObjects(
-  expiredObjects
+async function deleteOrphanObjects(
+  orphanObjects
 ) {
   const bucketName =
     getBucketName();
@@ -417,11 +495,11 @@ async function deleteExpiredObjects(
 
   for (
     let index = 0;
-    index < expiredObjects.length;
+    index < orphanObjects.length;
     index += DELETE_BATCH_SIZE
   ) {
     const batch =
-      expiredObjects.slice(
+      orphanObjects.slice(
         index,
         index +
           DELETE_BATCH_SIZE
@@ -441,10 +519,10 @@ async function deleteExpiredObjects(
               batch.map(
                 (object) => ({
                   Key:
-                    object.key,
+                    object.key
                 })
-              ),
-          },
+              )
+          }
         })
       );
 
@@ -474,52 +552,88 @@ async function deleteExpiredObjects(
 
         message:
           deletionError.Message ||
-          "R2 deletion failed.",
+          "R2 deletion failed."
       });
     }
   }
 
   return {
     deletedKeys,
-    deletionErrors,
+    deletionErrors
   };
 }
 
-async function runTemporaryUploadCleanup() {
-  const listedObjects =
-    await listTemporaryObjects();
-
-  const inspectedObjects =
-    await inspectObjectsInBatches(
-      listedObjects
-    );
+async function runUploadCleanup() {
+  /*
+    Load R2 objects and database references independently
+    so the two operations can run at the same time.
+  */
+  const [
+    listedObjects,
+    initialReferencedKeys
+  ] = await Promise.all([
+    listManagedUploadObjects(),
+    getReferencedStorageKeys()
+  ]);
 
   const {
-    expiredObjects,
-    skippedObjects,
-    failedObjects,
-  } =
-    selectExpiredObjects(
-      inspectedObjects
+    orphanCandidates,
+    referencedObjects,
+    recentObjects,
+    unmanagedObjects
+  } = selectOrphanCandidates({
+    listedObjects,
+    referencedKeys:
+      initialReferencedKeys
+  });
+
+  /*
+    Refresh the database references immediately before
+    deletion.
+
+    This reduces the chance of deleting a file that became
+    associated with a newly published beat during cleanup.
+  */
+  const finalReferencedKeys =
+    orphanCandidates.length > 0
+      ? await getReferencedStorageKeys()
+      : initialReferencedKeys;
+
+  const safeOrphanObjects =
+    orphanCandidates.filter(
+      (object) =>
+        !finalReferencedKeys.has(
+          object.key
+        )
+    );
+
+  const newlyReferencedObjects =
+    orphanCandidates.filter(
+      (object) =>
+        finalReferencedKeys.has(
+          object.key
+        )
     );
 
   const {
     deletedKeys,
-    deletionErrors,
-  } =
-    await deleteExpiredObjects(
-      expiredObjects
-    );
+    deletionErrors
+  } = await deleteOrphanObjects(
+    safeOrphanObjects
+  );
 
   const deletedKeySet =
-    new Set(deletedKeys);
+    new Set(
+      deletedKeys
+    );
 
   const deletedBytes =
-    expiredObjects
-      .filter((object) =>
-        deletedKeySet.has(
-          object.key
-        )
+    safeOrphanObjects
+      .filter(
+        (object) =>
+          deletedKeySet.has(
+            object.key
+          )
       )
       .reduce(
         (
@@ -538,8 +652,18 @@ async function runTemporaryUploadCleanup() {
     scanned:
       listedObjects.length,
 
-    expired:
-      expiredObjects.length,
+    referenced:
+      referencedObjects.length +
+      newlyReferencedObjects.length,
+
+    recentUnreferenced:
+      recentObjects.length,
+
+    unmanaged:
+      unmanagedObjects.length,
+
+    orphanCandidates:
+      safeOrphanObjects.length,
 
     deleted:
       deletedKeys.length,
@@ -547,13 +671,13 @@ async function runTemporaryUploadCleanup() {
     deletedBytes,
 
     retained:
-      skippedObjects.length,
-
-    inspectionFailures:
-      failedObjects,
+      referencedObjects.length +
+      newlyReferencedObjects.length +
+      recentObjects.length +
+      unmanagedObjects.length,
 
     deletionFailures:
-      deletionErrors,
+      deletionErrors
   };
 }
 
@@ -563,7 +687,7 @@ async function runCheckoutStateCleanup() {
 
   const {
     data,
-    error,
+    error
   } = await supabaseAdmin
     .rpc(
       "cleanup_safe_checkout_state"
@@ -601,7 +725,7 @@ async function runCheckoutStateCleanup() {
         data
           ?.released_failed_reservations ||
           0
-      ),
+      )
   };
 }
 
@@ -609,9 +733,6 @@ function hasUploadCleanupFailures(
   uploadCleanupResult
 ) {
   return (
-    uploadCleanupResult
-      .inspectionFailures
-      .length > 0 ||
     uploadCleanupResult
       .deletionFailures
       .length > 0
@@ -626,34 +747,34 @@ export async function GET(request) {
           success: false,
 
           error:
-            "Unauthorized cleanup request.",
+            "Unauthorized cleanup request."
         },
         {
           status: 401,
 
           headers: {
             "Cache-Control":
-              "no-store",
-          },
+              "no-store"
+          }
         }
       );
     }
 
     /*
-      The two cleanup operations are independent, so they can
-      run at the same time during one protected cron request.
+      Upload cleanup and checkout-state cleanup are
+      independent, so they can run at the same time.
     */
     const [
-      temporaryUploadCleanup,
-      checkoutStateCleanup,
+      uploadCleanup,
+      checkoutStateCleanup
     ] = await Promise.all([
-      runTemporaryUploadCleanup(),
-      runCheckoutStateCleanup(),
+      runUploadCleanup(),
+      runCheckoutStateCleanup()
     ]);
 
     const success =
       !hasUploadCleanupFailures(
-        temporaryUploadCleanup
+        uploadCleanup
       );
 
     return NextResponse.json(
@@ -662,15 +783,15 @@ export async function GET(request) {
 
         cleanup: {
           temporaryUploads:
-            temporaryUploadCleanup,
+            uploadCleanup,
 
           checkoutState:
-            checkoutStateCleanup,
+            checkoutStateCleanup
         },
 
         completedAt:
           new Date()
-            .toISOString(),
+            .toISOString()
       },
       {
         status:
@@ -680,8 +801,8 @@ export async function GET(request) {
 
         headers: {
           "Cache-Control":
-            "no-store",
-        },
+            "no-store"
+        }
       }
     );
   } catch (error) {
@@ -697,15 +818,15 @@ export async function GET(request) {
         error:
           error instanceof Error
             ? error.message
-            : "Internal Server Error during protected cleanup.",
+            : "Internal Server Error during protected cleanup."
       },
       {
         status: 500,
 
         headers: {
           "Cache-Control":
-            "no-store",
-        },
+            "no-store"
+        }
       }
     );
   }
