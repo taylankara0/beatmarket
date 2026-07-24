@@ -24,6 +24,7 @@ const MEGABYTE = 1024 * 1024;
 
 const PUBLISH_RATE_LIMIT_MAX_REQUESTS = 10;
 const PUBLISH_RATE_LIMIT_WINDOW_SECONDS = 60;
+const MAX_PUBLISH_REQUEST_BODY_BYTES = 32 * 1024;
 
 const MAX_TITLE_LENGTH = 120;
 const MAX_PRICE = 1000000;
@@ -172,6 +173,203 @@ async function getSupabaseAuthClient() {
       }
     }
   );
+}
+
+function createJsonResponse(
+  body,
+  init = {}
+) {
+  const headers =
+    new Headers(init.headers);
+
+  headers.set(
+    "Cache-Control",
+    "no-store"
+  );
+
+  return NextResponse.json(
+    body,
+    {
+      ...init,
+      headers
+    }
+  );
+}
+
+async function readJsonBodyWithLimit(
+  request
+) {
+  const contentTypeHeader =
+    request.headers.get(
+      "content-type"
+    );
+
+  if (
+    contentTypeHeader &&
+    normalizeContentType(
+      contentTypeHeader
+    ) !== "application/json"
+  ) {
+    return {
+      success: false,
+      status: 415,
+      error:
+        "The beat publishing request must use application/json."
+    };
+  }
+
+  const contentLengthHeader =
+    request.headers.get(
+      "content-length"
+    );
+
+  if (contentLengthHeader) {
+    const normalizedContentLength =
+      contentLengthHeader.trim();
+
+    if (
+      !/^\d+$/.test(
+        normalizedContentLength
+      )
+    ) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          "The beat publishing request body length is invalid."
+      };
+    }
+
+    const declaredContentLength =
+      Number(
+        normalizedContentLength
+      );
+
+    if (
+      !Number.isSafeInteger(
+        declaredContentLength
+      )
+    ) {
+      return {
+        success: false,
+        status: 400,
+        error:
+          "The beat publishing request body length is invalid."
+      };
+    }
+
+    if (
+      declaredContentLength >
+      MAX_PUBLISH_REQUEST_BODY_BYTES
+    ) {
+      return {
+        success: false,
+        status: 413,
+        error:
+          "The beat publishing request body is too large."
+      };
+    }
+  }
+
+  if (!request.body) {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The beat publishing request body is invalid."
+    };
+  }
+
+  const reader =
+    request.body.getReader();
+
+  const decoder =
+    new TextDecoder(
+      "utf-8",
+      {
+        fatal: true
+      }
+    );
+
+  let totalBytes = 0;
+  let bodyText = "";
+
+  try {
+    while (true) {
+      const {
+        done,
+        value
+      } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      totalBytes +=
+        value.byteLength;
+
+      if (
+        totalBytes >
+        MAX_PUBLISH_REQUEST_BODY_BYTES
+      ) {
+        try {
+          await reader.cancel();
+        } catch {
+          /*
+            The request is already being rejected, so a
+            cancellation error does not change the response.
+          */
+        }
+
+        return {
+          success: false,
+          status: 413,
+          error:
+            "The beat publishing request body is too large."
+        };
+      }
+
+      bodyText += decoder.decode(
+        value,
+        {
+          stream: true
+        }
+      );
+    }
+
+    bodyText += decoder.decode();
+  } catch {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The beat publishing request body is invalid."
+    };
+  }
+
+  if (!bodyText.trim()) {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The beat publishing request body is invalid."
+    };
+  }
+
+  try {
+    return {
+      success: true,
+      body:
+        JSON.parse(bodyText)
+    };
+  } catch {
+    return {
+      success: false,
+      status: 400,
+      error:
+        "The beat publishing request body is invalid."
+    };
+  }
 }
 
 function normalizePrice(value) {
@@ -601,7 +799,7 @@ export async function POST(request) {
         authError
       );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -629,7 +827,7 @@ export async function POST(request) {
         profileError
       );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -643,7 +841,7 @@ export async function POST(request) {
     }
 
     if (!profile?.is_producer) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -674,7 +872,7 @@ export async function POST(request) {
       });
 
     if (!rateLimitResult.allowed) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -701,8 +899,28 @@ export async function POST(request) {
       );
     }
 
+    const requestBodyResult =
+      await readJsonBodyWithLimit(
+        request
+      );
+
+    if (!requestBodyResult.success) {
+      return createJsonResponse(
+        {
+          success: false,
+
+          error:
+            requestBodyResult.error
+        },
+        {
+          status:
+            requestBodyResult.status
+        }
+      );
+    }
+
     const requestBody =
-      await request.json();
+      requestBodyResult.body;
 
     const title =
       typeof requestBody?.title ===
@@ -737,7 +955,7 @@ export async function POST(request) {
       title.length >
         MAX_TITLE_LENGTH
     ) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -751,7 +969,7 @@ export async function POST(request) {
     }
 
     if (!bpmResult.valid) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -765,7 +983,7 @@ export async function POST(request) {
     }
 
     if (!basicPrice) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -779,7 +997,7 @@ export async function POST(request) {
     }
 
     if (!exclusivePrice) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -796,7 +1014,7 @@ export async function POST(request) {
       Number(exclusivePrice) <=
       Number(basicPrice)
     ) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -815,7 +1033,7 @@ export async function POST(request) {
       typeof masterKey !==
         "string"
     ) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -831,7 +1049,7 @@ export async function POST(request) {
     if (
       previewKey === masterKey
     ) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -866,7 +1084,7 @@ export async function POST(request) {
           "master"
       })
     ) {
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -901,7 +1119,7 @@ export async function POST(request) {
         storageError
       );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -953,7 +1171,7 @@ export async function POST(request) {
         validationError
       );
 
-      return NextResponse.json(
+      return createJsonResponse(
         {
           success: false,
 
@@ -1086,7 +1304,7 @@ export async function POST(request) {
       );
     }
 
-    return NextResponse.json(
+    return createJsonResponse(
       {
         success: true,
 
@@ -1125,7 +1343,7 @@ export async function POST(request) {
       error
     );
 
-    return NextResponse.json(
+    return createJsonResponse(
       {
         success: false,
 
