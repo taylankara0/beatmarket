@@ -1,15 +1,23 @@
 import { randomUUID } from "crypto";
+import {
+  createClient as createSupabaseAdminClient,
+} from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import {
+  consumeApiRateLimit,
+} from "@/lib/apiRateLimit";
 import { r2Client } from "@/lib/r2";
 
 export const runtime = "nodejs";
 
 const MEGABYTE = 1024 * 1024;
+const UPLOAD_RATE_LIMIT_MAX_REQUESTS = 20;
+const UPLOAD_RATE_LIMIT_WINDOW_SECONDS = 60;
 
 const UPLOAD_POLICIES = {
   preview: {
@@ -38,6 +46,32 @@ const UPLOAD_POLICIES = {
 };
 
 const MAX_FILENAME_LENGTH = 180;
+
+function getSupabaseAdmin() {
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL;
+
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "Supabase URL or SUPABASE_SERVICE_ROLE_KEY is missing."
+    );
+  }
+
+  return createSupabaseAdminClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+}
 
 async function getSupabaseAuthClient() {
   const supabaseUrl =
@@ -279,6 +313,42 @@ export async function POST(request) {
         },
         {
           status: 403,
+        }
+      );
+    }
+
+    const supabaseAdmin =
+      getSupabaseAdmin();
+
+    const rateLimitResult =
+      await consumeApiRateLimit({
+        supabaseAdmin,
+        rateKey:
+          `upload:user:${user.id}`,
+        maxRequests:
+          UPLOAD_RATE_LIMIT_MAX_REQUESTS,
+        windowSeconds:
+          UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
+      });
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Too many upload authorization requests. Please wait before trying again.",
+        },
+        {
+          status: 429,
+          headers: {
+            "Cache-Control": "no-store",
+            "Retry-After": String(
+              Math.max(
+                1,
+                rateLimitResult.retryAfterSeconds
+              )
+            ),
+          },
         }
       );
     }
