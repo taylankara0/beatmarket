@@ -1,26 +1,54 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState
+} from 'react';
+
 import { createClient } from '@/lib/supabase-client';
 import { useCart } from '@/context/CartContext';
 
 export default function ExplorePage() {
-  const [beats, setBeats] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [beats, setBeats] =
+    useState([]);
 
-  const { addToCart } = useCart();
+  const [loading, setLoading] =
+    useState(true);
+
+  const [
+    playingBeatId,
+    setPlayingBeatId
+  ] = useState(null);
+
+  const [
+    previewErrorBeatId,
+    setPreviewErrorBeatId
+  ] = useState(null);
+
+  const audioRef =
+    useRef(null);
+
+  const currentBeatIdRef =
+    useRef(null);
+
+  const { addToCart } =
+    useCart();
 
   useEffect(() => {
     async function fetchBeats() {
-      const supabase = createClient();
+      const supabase =
+        createClient();
 
-      const { data, error } = await supabase
+      const {
+        data,
+        error
+      } = await supabase
         .from('beats')
         .select(`
           id,
           title,
           bpm,
-          preview_url,
           is_sold_exclusive,
           profiles (
             username,
@@ -42,7 +70,9 @@ export default function ExplorePage() {
           error
         );
       } else {
-        setBeats(data || []);
+        setBeats(
+          data || []
+        );
       }
 
       setLoading(false);
@@ -50,6 +80,143 @@ export default function ExplorePage() {
 
     fetchBeats();
   }, []);
+
+  useEffect(() => {
+    const audio =
+      new Audio();
+
+    audio.preload =
+      'none';
+
+    function handleEnded() {
+      currentBeatIdRef.current =
+        null;
+
+      setPlayingBeatId(
+        null
+      );
+    }
+
+    function handleError() {
+      const failedBeatId =
+        currentBeatIdRef.current;
+
+      console.error(
+        'Beat preview playback failed.'
+      );
+
+      setPlayingBeatId(
+        null
+      );
+
+      setPreviewErrorBeatId(
+        failedBeatId
+      );
+    }
+
+    audio.addEventListener(
+      'ended',
+      handleEnded
+    );
+
+    audio.addEventListener(
+      'error',
+      handleError
+    );
+
+    audioRef.current =
+      audio;
+
+    return () => {
+      audio.removeEventListener(
+        'ended',
+        handleEnded
+      );
+
+      audio.removeEventListener(
+        'error',
+        handleError
+      );
+
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+
+      audioRef.current =
+        null;
+
+      currentBeatIdRef.current =
+        null;
+    };
+  }, []);
+
+  async function handlePreview(
+    beatId
+  ) {
+    const audio =
+      audioRef.current;
+
+    if (!audio) {
+      return;
+    }
+
+    setPreviewErrorBeatId(
+      null
+    );
+
+    if (
+      playingBeatId === beatId &&
+      !audio.paused
+    ) {
+      audio.pause();
+
+      currentBeatIdRef.current =
+        null;
+
+      setPlayingBeatId(
+        null
+      );
+
+      return;
+    }
+
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+
+      currentBeatIdRef.current =
+        beatId;
+
+      audio.src =
+        `/api/stream?beatId=${encodeURIComponent(
+          beatId
+        )}`;
+
+      audio.load();
+
+      await audio.play();
+
+      setPlayingBeatId(
+        beatId
+      );
+    } catch (error) {
+      console.error(
+        'Beat preview playback error:',
+        error
+      );
+
+      currentBeatIdRef.current =
+        null;
+
+      setPlayingBeatId(
+        null
+      );
+
+      setPreviewErrorBeatId(
+        beatId
+      );
+    }
+  }
 
   function handleAddLicenseToCart(
     beat,
@@ -119,7 +286,8 @@ export default function ExplorePage() {
             const basicLicense =
               beat.licenses?.find(
                 (license) =>
-                  license.name === 'Basic'
+                  license.name ===
+                  'Basic'
               );
 
             const exclusiveLicense =
@@ -133,6 +301,14 @@ export default function ExplorePage() {
               Boolean(
                 beat.is_sold_exclusive
               );
+
+            const isPlaying =
+              playingBeatId ===
+              beat.id;
+
+            const previewFailed =
+              previewErrorBeatId ===
+              beat.id;
 
             return (
               <div
@@ -236,10 +412,26 @@ export default function ExplorePage() {
                 <div className="mt-4">
                   <button
                     type="button"
+                    onClick={() =>
+                      handlePreview(
+                        beat.id
+                      )
+                    }
+                    aria-pressed={
+                      isPlaying
+                    }
                     className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white transition hover:bg-indigo-700"
                   >
-                    Play Preview
+                    {isPlaying
+                      ? 'Pause Preview'
+                      : 'Play Preview'}
                   </button>
+
+                  {previewFailed && (
+                    <p className="mt-2 text-center text-xs text-red-300">
+                      The preview could not be played.
+                    </p>
+                  )}
                 </div>
               </div>
             );
