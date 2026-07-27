@@ -4,6 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 import {
+  sendPurchaseConfirmationEmail
+} from '../../../../../lib/purchaseConfirmationEmail';
+
+import {
   PAYMENT_MODES,
   getPaymentMode
 } from '../../../../../lib/paymentMode';
@@ -724,6 +728,7 @@ export async function POST(request) {
         paid_price,
         currency,
         payment_id,
+        buyer_email,
         cart_snapshot
       `)
       .eq('iyzico_token', token)
@@ -799,6 +804,13 @@ export async function POST(request) {
         supabase,
         order.id
       );
+
+      await sendPurchaseConfirmationEmail({
+        supabase,
+        order,
+        baseUrl:
+          getBaseUrl(request).toString()
+      });
 
       return createRedirect(
         request,
@@ -1042,7 +1054,15 @@ export async function POST(request) {
         'in',
         '("paid","refunded")'
       )
-      .select('id, public_id')
+      .select(`
+        id,
+        public_id,
+        price,
+        paid_price,
+        currency,
+        buyer_email,
+        cart_snapshot
+      `)
       .maybeSingle();
 
     if (paidOrderError) {
@@ -1075,7 +1095,12 @@ export async function POST(request) {
           id,
           public_id,
           status,
-          payment_id
+          payment_id,
+          price,
+          paid_price,
+          currency,
+          buyer_email,
+          cart_snapshot
         `)
         .eq('id', order.id)
         .maybeSingle();
@@ -1158,6 +1183,13 @@ export async function POST(request) {
         concurrentlyPaidOrder.id
       );
 
+      await sendPurchaseConfirmationEmail({
+        supabase,
+        order: concurrentlyPaidOrder,
+        baseUrl:
+          getBaseUrl(request).toString()
+      });
+
       return createRedirect(
         request,
         '/payment/success',
@@ -1185,6 +1217,13 @@ export async function POST(request) {
       supabase,
       paidOrder.id
     );
+
+    await sendPurchaseConfirmationEmail({
+      supabase,
+      order: paidOrder,
+      baseUrl:
+        getBaseUrl(request).toString()
+    });
 
     /*
       Only the public order ID is included in the URL.
