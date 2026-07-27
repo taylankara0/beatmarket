@@ -26,11 +26,17 @@ const r2Origin =
     ? `https://${r2AccountId}.r2.cloudflarestorage.com`
     : null;
 
+const r2BucketOriginPattern =
+  r2AccountId
+    ? `https://*.${r2AccountId}.r2.cloudflarestorage.com`
+    : null;
+
 function buildContentSecurityPolicy() {
   const connectSources = [
     "'self'",
     supabaseOrigin,
     r2Origin,
+    r2BucketOriginPattern,
     isDevelopment
       ? 'ws:'
       : null,
