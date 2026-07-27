@@ -29,6 +29,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SCHEDULED_JOB_NAME =
+  "cleanup_uploads_and_state";
+
 const MANAGED_UPLOAD_PREFIX =
   "masters/";
 
@@ -200,6 +203,84 @@ function isAuthorized(request) {
     providedSecret,
     expectedSecret
   );
+}
+
+function getSafeErrorMessage(error) {
+  return error instanceof Error
+    ? error.message
+    : "Internal Server Error during protected cleanup.";
+}
+
+async function recordScheduledJobRun({
+  requestId,
+  status,
+  startedAt,
+  completedAt,
+  durationMs,
+  summary,
+  errorMessage = null
+}) {
+  try {
+    const supabaseAdmin =
+      getSupabaseAdmin();
+
+    const {
+      error
+    } = await supabaseAdmin
+      .from("scheduled_job_runs")
+      .insert({
+        job_name:
+          SCHEDULED_JOB_NAME,
+
+        request_id:
+          requestId,
+
+        status,
+
+        started_at:
+          startedAt,
+
+        completed_at:
+          completedAt,
+
+        duration_ms:
+          durationMs,
+
+        summary,
+
+        error_message:
+          errorMessage
+      });
+
+    if (error) {
+      throw new Error(
+        "The scheduled job run could not be recorded.",
+        {
+          cause:
+            error
+        }
+      );
+    }
+
+    return true;
+  } catch (error) {
+    logError(
+      "scheduled_job_run_record_failed",
+      error,
+      {
+        requestId,
+        jobName:
+          SCHEDULED_JOB_NAME,
+        status
+      }
+    );
+
+    /*
+      Monitoring persistence must not change the result
+      of the cleanup operation itself.
+    */
+    return false;
+  }
 }
 
 function isManagedUploadKey(
@@ -799,8 +880,14 @@ export async function GET(request) {
   const requestId =
     createRequestId(request);
 
+  const startedAtDate =
+    new Date();
+
   const startedAt =
-    Date.now();
+    startedAtDate.toISOString();
+
+  let authorizedRequest =
+    false;
 
   try {
     if (!isAuthorized(request)) {
@@ -829,12 +916,16 @@ export async function GET(request) {
       );
     }
 
+    authorizedRequest =
+      true;
+
     logInfo(
       "cleanup_started",
       {
         requestId,
         method:
-          request.method
+          request.method,
+        startedAt
       }
     );
 
@@ -858,18 +949,20 @@ export async function GET(request) {
         uploadCleanup
       );
 
+    const completedAtDate =
+      new Date();
+
     const completedAt =
-      new Date().toISOString();
+      completedAtDate.toISOString();
 
     const durationMs =
-      Date.now() -
-      startedAt;
+      Math.max(
+        0,
+        completedAtDate.getTime() -
+          startedAtDate.getTime()
+      );
 
-    const logContext = {
-      requestId,
-      durationMs,
-      completedAt,
-
+    const summary = {
       temporaryUploads: {
         scanned:
           uploadCleanup.scanned,
@@ -908,6 +1001,30 @@ export async function GET(request) {
 
       apiRateLimits:
         apiRateLimitCleanup
+    };
+
+    const jobStatus =
+      success
+        ? "succeeded"
+        : "partial_failure";
+
+    const historyRecorded =
+      await recordScheduledJobRun({
+        requestId,
+        status:
+          jobStatus,
+        startedAt,
+        completedAt,
+        durationMs,
+        summary
+      });
+
+    const logContext = {
+      requestId,
+      durationMs,
+      completedAt,
+      historyRecorded,
+      ...summary
     };
 
     if (success) {
@@ -950,6 +1067,43 @@ export async function GET(request) {
       }
     );
   } catch (error) {
+    const completedAtDate =
+      new Date();
+
+    const completedAt =
+      completedAtDate.toISOString();
+
+    const durationMs =
+      Math.max(
+        0,
+        completedAtDate.getTime() -
+          startedAtDate.getTime()
+      );
+
+    const errorMessage =
+      getSafeErrorMessage(error);
+
+    let historyRecorded =
+      false;
+
+    /*
+      Unauthorized public requests are not written to the
+      scheduled-job history table.
+    */
+    if (authorizedRequest) {
+      historyRecorded =
+        await recordScheduledJobRun({
+          requestId,
+          status:
+            "failed",
+          startedAt,
+          completedAt,
+          durationMs,
+          summary: {},
+          errorMessage
+        });
+    }
+
     logError(
       "cleanup_failed",
       error,
@@ -959,9 +1113,9 @@ export async function GET(request) {
         method:
           request.method,
 
-        durationMs:
-          Date.now() -
-          startedAt
+        completedAt,
+        durationMs,
+        historyRecorded
       }
     );
 
@@ -970,9 +1124,7 @@ export async function GET(request) {
         success: false,
 
         error:
-          error instanceof Error
-            ? error.message
-            : "Internal Server Error during protected cleanup.",
+          errorMessage,
 
         requestId
       },
