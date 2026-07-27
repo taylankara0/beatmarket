@@ -8,6 +8,10 @@ import {
 } from '../../../../../lib/purchaseConfirmationEmail';
 
 import {
+  sendProducerSaleNotificationEmails
+} from '../../../../../lib/producerSaleNotificationEmail';
+
+import {
   PAYMENT_MODES,
   getPaymentMode
 } from '../../../../../lib/paymentMode';
@@ -812,6 +816,13 @@ export async function POST(request) {
           getBaseUrl(request).toString()
       });
 
+      await sendProducerSaleNotificationEmails({
+        supabase,
+        order,
+        baseUrl:
+          getBaseUrl(request).toString()
+      });
+
       return createRedirect(
         request,
         '/payment/success',
@@ -1190,6 +1201,13 @@ export async function POST(request) {
           getBaseUrl(request).toString()
       });
 
+      await sendProducerSaleNotificationEmails({
+        supabase,
+        order: concurrentlyPaidOrder,
+        baseUrl:
+          getBaseUrl(request).toString()
+      });
+
       return createRedirect(
         request,
         '/payment/success',
@@ -1219,6 +1237,13 @@ export async function POST(request) {
     );
 
     await sendPurchaseConfirmationEmail({
+      supabase,
+      order: paidOrder,
+      baseUrl:
+        getBaseUrl(request).toString()
+    });
+
+    await sendProducerSaleNotificationEmails({
       supabase,
       order: paidOrder,
       baseUrl:
