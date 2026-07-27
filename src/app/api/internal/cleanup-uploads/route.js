@@ -729,6 +729,35 @@ async function runCheckoutStateCleanup() {
   };
 }
 
+async function runApiRateLimitCleanup() {
+  const supabaseAdmin =
+    getSupabaseAdmin();
+
+  const {
+    data,
+    error
+  } = await supabaseAdmin
+    .rpc(
+      "cleanup_expired_api_rate_limits"
+    );
+
+  if (error) {
+    console.error(
+      "API rate-limit cleanup RPC error:",
+      error
+    );
+
+    throw new Error(
+      "Expired API rate-limit records could not be cleaned up."
+    );
+  }
+
+  return {
+    deletedRows:
+      Number(data || 0)
+  };
+}
+
 function hasUploadCleanupFailures(
   uploadCleanupResult
 ) {
@@ -761,15 +790,18 @@ export async function GET(request) {
     }
 
     /*
-      Upload cleanup and checkout-state cleanup are
-      independent, so they can run at the same time.
+      Upload cleanup, checkout-state cleanup, and
+      API rate-limit cleanup are independent, so
+      they can run at the same time.
     */
     const [
       uploadCleanup,
-      checkoutStateCleanup
+      checkoutStateCleanup,
+      apiRateLimitCleanup
     ] = await Promise.all([
       runUploadCleanup(),
-      runCheckoutStateCleanup()
+      runCheckoutStateCleanup(),
+      runApiRateLimitCleanup()
     ]);
 
     const success =
@@ -786,7 +818,10 @@ export async function GET(request) {
             uploadCleanup,
 
           checkoutState:
-            checkoutStateCleanup
+            checkoutStateCleanup,
+
+          apiRateLimits:
+            apiRateLimitCleanup
         },
 
         completedAt:
