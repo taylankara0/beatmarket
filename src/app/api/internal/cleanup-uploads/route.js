@@ -19,6 +19,13 @@ import {
   r2Client
 } from "@/lib/r2";
 
+import {
+  createRequestId,
+  logError,
+  logInfo,
+  logWarning
+} from "@/lib/serverLogger";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -93,6 +100,29 @@ function getSupabaseAdmin() {
       auth: {
         autoRefreshToken: false,
         persistSession: false
+      }
+    }
+  );
+}
+
+function createJsonResponse(
+  body,
+  {
+    status,
+    requestId
+  }
+) {
+  return NextResponse.json(
+    body,
+    {
+      status,
+
+      headers: {
+        "Cache-Control":
+          "no-store",
+
+        "X-Request-Id":
+          requestId
       }
     }
   );
@@ -364,13 +394,12 @@ async function getReferencedStorageKeys() {
       );
 
     if (error) {
-      console.error(
-        "Referenced upload lookup error:",
-        error
-      );
-
       throw new Error(
-        "Published beat files could not be checked before cleanup."
+        "Published beat files could not be checked before cleanup.",
+        {
+          cause:
+            error
+        }
       );
     }
 
@@ -695,13 +724,12 @@ async function runCheckoutStateCleanup() {
     .single();
 
   if (error) {
-    console.error(
-      "Checkout state cleanup RPC error:",
-      error
-    );
-
     throw new Error(
-      "Expired checkout state could not be cleaned up."
+      "Expired checkout state could not be cleaned up.",
+      {
+        cause:
+          error
+      }
     );
   }
 
@@ -742,13 +770,12 @@ async function runApiRateLimitCleanup() {
     );
 
   if (error) {
-    console.error(
-      "API rate-limit cleanup RPC error:",
-      error
-    );
-
     throw new Error(
-      "Expired API rate-limit records could not be cleaned up."
+      "Expired API rate-limit records could not be cleaned up.",
+      {
+        cause:
+          error
+      }
     );
   }
 
@@ -769,25 +796,47 @@ function hasUploadCleanupFailures(
 }
 
 export async function GET(request) {
+  const requestId =
+    createRequestId(request);
+
+  const startedAt =
+    Date.now();
+
   try {
     if (!isAuthorized(request)) {
-      return NextResponse.json(
+      logWarning(
+        "cleanup_unauthorized",
+        {
+          requestId,
+          method:
+            request.method
+        }
+      );
+
+      return createJsonResponse(
         {
           success: false,
 
           error:
-            "Unauthorized cleanup request."
+            "Unauthorized cleanup request.",
+
+          requestId
         },
         {
           status: 401,
-
-          headers: {
-            "Cache-Control":
-              "no-store"
-          }
+          requestId
         }
       );
     }
+
+    logInfo(
+      "cleanup_started",
+      {
+        requestId,
+        method:
+          request.method
+      }
+    );
 
     /*
       Upload cleanup, checkout-state cleanup, and
@@ -809,7 +858,71 @@ export async function GET(request) {
         uploadCleanup
       );
 
-    return NextResponse.json(
+    const completedAt =
+      new Date().toISOString();
+
+    const durationMs =
+      Date.now() -
+      startedAt;
+
+    const logContext = {
+      requestId,
+      durationMs,
+      completedAt,
+
+      temporaryUploads: {
+        scanned:
+          uploadCleanup.scanned,
+
+        referenced:
+          uploadCleanup.referenced,
+
+        recentUnreferenced:
+          uploadCleanup
+            .recentUnreferenced,
+
+        unmanaged:
+          uploadCleanup.unmanaged,
+
+        orphanCandidates:
+          uploadCleanup
+            .orphanCandidates,
+
+        deleted:
+          uploadCleanup.deleted,
+
+        deletedBytes:
+          uploadCleanup.deletedBytes,
+
+        retained:
+          uploadCleanup.retained,
+
+        deletionFailureCount:
+          uploadCleanup
+            .deletionFailures
+            .length
+      },
+
+      checkoutState:
+        checkoutStateCleanup,
+
+      apiRateLimits:
+        apiRateLimitCleanup
+    };
+
+    if (success) {
+      logInfo(
+        "cleanup_completed",
+        logContext
+      );
+    } else {
+      logWarning(
+        "cleanup_completed_with_failures",
+        logContext
+      );
+    }
+
+    return createJsonResponse(
       {
         success,
 
@@ -824,9 +937,8 @@ export async function GET(request) {
             apiRateLimitCleanup
         },
 
-        completedAt:
-          new Date()
-            .toISOString()
+        completedAt,
+        requestId
       },
       {
         status:
@@ -834,34 +946,39 @@ export async function GET(request) {
             ? 200
             : 207,
 
-        headers: {
-          "Cache-Control":
-            "no-store"
-        }
+        requestId
       }
     );
   } catch (error) {
-    console.error(
-      "Protected cleanup error:",
-      error
+    logError(
+      "cleanup_failed",
+      error,
+      {
+        requestId,
+
+        method:
+          request.method,
+
+        durationMs:
+          Date.now() -
+          startedAt
+      }
     );
 
-    return NextResponse.json(
+    return createJsonResponse(
       {
         success: false,
 
         error:
           error instanceof Error
             ? error.message
-            : "Internal Server Error during protected cleanup."
+            : "Internal Server Error during protected cleanup.",
+
+        requestId
       },
       {
         status: 500,
-
-        headers: {
-          "Cache-Control":
-            "no-store"
-        }
+        requestId
       }
     );
   }
