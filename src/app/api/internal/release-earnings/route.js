@@ -15,6 +15,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SCHEDULED_JOB_NAME =
+  "release_matured_earnings";
+
 function getCronSecret() {
   const cronSecret =
     process.env.CRON_SECRET;
@@ -148,6 +151,84 @@ function isAuthorized(request) {
   );
 }
 
+function getSafeErrorMessage(error) {
+  return error instanceof Error
+    ? error.message
+    : "Internal Server Error during earnings release.";
+}
+
+async function recordScheduledJobRun({
+  requestId,
+  status,
+  startedAt,
+  completedAt,
+  durationMs,
+  summary,
+  errorMessage = null,
+}) {
+  try {
+    const supabaseAdmin =
+      getSupabaseAdmin();
+
+    const {
+      error,
+    } = await supabaseAdmin
+      .from("scheduled_job_runs")
+      .insert({
+        job_name:
+          SCHEDULED_JOB_NAME,
+
+        request_id:
+          requestId,
+
+        status,
+
+        started_at:
+          startedAt,
+
+        completed_at:
+          completedAt,
+
+        duration_ms:
+          durationMs,
+
+        summary,
+
+        error_message:
+          errorMessage,
+      });
+
+    if (error) {
+      throw new Error(
+        "The scheduled job run could not be recorded.",
+        {
+          cause:
+            error,
+        }
+      );
+    }
+
+    return true;
+  } catch (error) {
+    logError(
+      "scheduled_job_run_record_failed",
+      error,
+      {
+        requestId,
+        jobName:
+          SCHEDULED_JOB_NAME,
+        status,
+      }
+    );
+
+    /*
+      Monitoring persistence must not change the result
+      of the earnings-release operation itself.
+    */
+    return false;
+  }
+}
+
 async function releaseMaturedEarnings() {
   const supabaseAdmin =
     getSupabaseAdmin();
@@ -190,6 +271,15 @@ export async function GET(request) {
   const requestId =
     createRequestId(request);
 
+  const startedAtDate =
+    new Date();
+
+  const startedAt =
+    startedAtDate.toISOString();
+
+  let authorizedRequest =
+    false;
+
   try {
     if (!isAuthorized(request)) {
       logWarning(
@@ -217,11 +307,37 @@ export async function GET(request) {
       );
     }
 
+    authorizedRequest =
+      true;
+
     const releasedCount =
       await releaseMaturedEarnings();
 
+    const completedAtDate =
+      new Date();
+
     const completedAt =
-      new Date().toISOString();
+      completedAtDate.toISOString();
+
+    const durationMs =
+      Math.max(
+        0,
+        completedAtDate.getTime() -
+          startedAtDate.getTime()
+      );
+
+    const historyRecorded =
+      await recordScheduledJobRun({
+        requestId,
+        status:
+          "succeeded",
+        startedAt,
+        completedAt,
+        durationMs,
+        summary: {
+          releasedCount,
+        },
+      });
 
     logInfo(
       "earnings_release_completed",
@@ -229,6 +345,8 @@ export async function GET(request) {
         requestId,
         releasedCount,
         completedAt,
+        durationMs,
+        historyRecorded,
       }
     );
 
@@ -250,6 +368,43 @@ export async function GET(request) {
       }
     );
   } catch (error) {
+    const completedAtDate =
+      new Date();
+
+    const completedAt =
+      completedAtDate.toISOString();
+
+    const durationMs =
+      Math.max(
+        0,
+        completedAtDate.getTime() -
+          startedAtDate.getTime()
+      );
+
+    const errorMessage =
+      getSafeErrorMessage(error);
+
+    let historyRecorded =
+      false;
+
+    /*
+      Unauthorized public requests are not written to the
+      scheduled-job history table.
+    */
+    if (authorizedRequest) {
+      historyRecorded =
+        await recordScheduledJobRun({
+          requestId,
+          status:
+            "failed",
+          startedAt,
+          completedAt,
+          durationMs,
+          summary: {},
+          errorMessage,
+        });
+    }
+
     logError(
       "earnings_release_failed",
       error,
@@ -257,6 +412,9 @@ export async function GET(request) {
         requestId,
         method:
           request.method,
+        completedAt,
+        durationMs,
+        historyRecorded,
       }
     );
 
@@ -265,9 +423,7 @@ export async function GET(request) {
         success: false,
 
         error:
-          error instanceof Error
-            ? error.message
-            : "Internal Server Error during earnings release.",
+          errorMessage,
 
         requestId,
       },
