@@ -5,6 +5,13 @@ import {
   createClient as createSupabaseAdminClient,
 } from "@supabase/supabase-js";
 
+import {
+  createRequestId,
+  logError,
+  logInfo,
+  logWarning,
+} from "@/lib/serverLogger";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -45,6 +52,29 @@ function getSupabaseAdmin() {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+    }
+  );
+}
+
+function createJsonResponse(
+  body,
+  {
+    status,
+    requestId,
+  }
+) {
+  return NextResponse.json(
+    body,
+    {
+      status,
+
+      headers: {
+        "Cache-Control":
+          "no-store",
+
+        "X-Request-Id":
+          requestId,
       },
     }
   );
@@ -130,13 +160,12 @@ async function releaseMaturedEarnings() {
   );
 
   if (error) {
-    console.error(
-      "Producer earnings release RPC error:",
-      error
-    );
-
     throw new Error(
-      "Matured producer earnings could not be released."
+      "Matured producer earnings could not be released.",
+      {
+        cause:
+          error,
+      }
     );
   }
 
@@ -158,20 +187,32 @@ async function releaseMaturedEarnings() {
 }
 
 export async function GET(request) {
+  const requestId =
+    createRequestId(request);
+
   try {
     if (!isAuthorized(request)) {
-      return NextResponse.json(
+      logWarning(
+        "earnings_release_unauthorized",
+        {
+          requestId,
+          method:
+            request.method,
+        }
+      );
+
+      return createJsonResponse(
         {
           success: false,
+
           error:
             "Unauthorized earnings release request.",
+
+          requestId,
         },
         {
           status: 401,
-          headers: {
-            "Cache-Control":
-              "no-store",
-          },
+          requestId,
         }
       );
     }
@@ -179,7 +220,19 @@ export async function GET(request) {
     const releasedCount =
       await releaseMaturedEarnings();
 
-    return NextResponse.json(
+    const completedAt =
+      new Date().toISOString();
+
+    logInfo(
+      "earnings_release_completed",
+      {
+        requestId,
+        releasedCount,
+        completedAt,
+      }
+    );
+
+    return createJsonResponse(
       {
         success: true,
 
@@ -188,24 +241,26 @@ export async function GET(request) {
             releasedCount,
         },
 
-        completedAt:
-          new Date().toISOString(),
+        completedAt,
+        requestId,
       },
       {
         status: 200,
-        headers: {
-          "Cache-Control":
-            "no-store",
-        },
+        requestId,
       }
     );
   } catch (error) {
-    console.error(
-      "Protected earnings release error:",
-      error
+    logError(
+      "earnings_release_failed",
+      error,
+      {
+        requestId,
+        method:
+          request.method,
+      }
     );
 
-    return NextResponse.json(
+    return createJsonResponse(
       {
         success: false,
 
@@ -213,13 +268,12 @@ export async function GET(request) {
           error instanceof Error
             ? error.message
             : "Internal Server Error during earnings release.",
+
+        requestId,
       },
       {
         status: 500,
-        headers: {
-          "Cache-Control":
-            "no-store",
-        },
+        requestId,
       }
     );
   }
