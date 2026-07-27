@@ -11,6 +11,10 @@ import {
   consumeApiRateLimit,
 } from '@/lib/apiRateLimit';
 
+import {
+  sendRefundConfirmationEmail,
+} from '@/lib/refundConfirmationEmail';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -96,6 +100,16 @@ async function getSupabaseAuthClient() {
       },
     }
   );
+}
+
+function getBaseUrl(request) {
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return new URL(
+      process.env.NEXT_PUBLIC_SITE_URL
+    );
+  }
+
+  return new URL(request.url);
 }
 
 function normalizeUuid(value) {
@@ -608,6 +622,13 @@ export async function POST(
     }
 
     if (refund.status === 'refunded') {
+      await sendRefundConfirmationEmail({
+        supabase: supabaseAdmin,
+        refund,
+        baseUrl:
+          getBaseUrl(request).toString(),
+      });
+
       return NextResponse.json(
         {
           success: true,
@@ -714,6 +735,13 @@ export async function POST(
         completedRefund?.status ===
         'refunded'
       ) {
+        await sendRefundConfirmationEmail({
+          supabase: supabaseAdmin,
+          refund: completedRefund,
+          baseUrl:
+            getBaseUrl(request).toString(),
+        });
+
         return NextResponse.json(
           {
             success: true,
@@ -1158,6 +1186,18 @@ export async function POST(
         supabaseAdmin,
         refundId: refund.id,
       });
+
+    if (
+      completedRefund?.status ===
+      'refunded'
+    ) {
+      await sendRefundConfirmationEmail({
+        supabase: supabaseAdmin,
+        refund: completedRefund,
+        baseUrl:
+          getBaseUrl(request).toString(),
+      });
+    }
 
     return NextResponse.json(
       {
