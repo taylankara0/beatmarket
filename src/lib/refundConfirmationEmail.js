@@ -8,6 +8,10 @@ import {
   logWarning,
 } from './serverLogger';
 
+import {
+  sendProducerRefundNotificationEmails,
+} from './producerRefundNotificationEmail';
+
 const DEFAULT_FROM_EMAIL =
   'BeatMarket <onboarding@resend.dev>';
 
@@ -483,7 +487,7 @@ async function recordEmailSuccess({
   }
 }
 
-export async function sendRefundConfirmationEmail({
+async function sendBuyerRefundConfirmationEmail({
   supabase,
   refund,
   baseUrl,
@@ -670,4 +674,33 @@ export async function sendRefundConfirmationEmail({
       skipped: false,
     };
   }
+}
+
+export async function sendRefundConfirmationEmail({
+  supabase,
+  refund,
+  baseUrl,
+  requestId = null,
+}) {
+  const buyerResult =
+    await sendBuyerRefundConfirmationEmail({
+      supabase,
+      refund,
+      baseUrl,
+      requestId,
+    });
+
+  const producerResult =
+    await sendProducerRefundNotificationEmails({
+      supabase,
+      refund,
+      baseUrl,
+      requestId,
+    });
+
+  return {
+    ...buyerResult,
+    producerNotifications:
+      producerResult,
+  };
 }
