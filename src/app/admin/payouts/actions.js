@@ -3,6 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
+import {
+  PAYOUT_EVENT,
+  sendPayoutStatusEmail,
+} from '@/lib/payoutStatusEmail';
 import { createClient } from '@/lib/supabase-server';
 
 function buildAdminPayoutUrl(type, message) {
@@ -40,6 +44,13 @@ async function getAuthenticatedClient() {
   }
 
   return supabase;
+}
+
+function getEmailBaseUrl() {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    null
+  );
 }
 
 export async function approvePayoutRequest(formData) {
@@ -81,7 +92,16 @@ export async function approvePayoutRequest(formData) {
     );
   }
 
+  await sendPayoutStatusEmail({
+    payoutRequestId,
+    eventType:
+      PAYOUT_EVENT.APPROVED,
+    baseUrl:
+      getEmailBaseUrl(),
+  });
+
   revalidatePath('/admin/payouts');
+  revalidatePath('/dashboard');
 
   redirect(
     buildAdminPayoutUrl(
@@ -147,6 +167,14 @@ export async function rejectPayoutRequest(formData) {
       )
     );
   }
+
+  await sendPayoutStatusEmail({
+    payoutRequestId,
+    eventType:
+      PAYOUT_EVENT.REJECTED,
+    baseUrl:
+      getEmailBaseUrl(),
+  });
 
   revalidatePath('/admin/payouts');
   revalidatePath('/dashboard');
@@ -216,6 +244,14 @@ export async function completePayoutRequest(formData) {
       )
     );
   }
+
+  await sendPayoutStatusEmail({
+    payoutRequestId,
+    eventType:
+      PAYOUT_EVENT.PAID,
+    baseUrl:
+      getEmailBaseUrl(),
+  });
 
   revalidatePath('/admin/payouts');
   revalidatePath('/dashboard');
