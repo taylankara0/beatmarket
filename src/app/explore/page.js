@@ -9,6 +9,46 @@ import {
 import { createClient } from '@/lib/supabase-client';
 import { useCart } from '@/context/CartContext';
 
+function getProducerIdentity(profile) {
+  const displayName =
+    String(
+      profile?.display_name || ''
+    ).trim();
+
+  if (displayName) {
+    return {
+      displayLabel:
+        displayName,
+
+      cartValue:
+        displayName
+    };
+  }
+
+  const username =
+    String(
+      profile?.username || ''
+    ).trim();
+
+  if (username) {
+    return {
+      displayLabel:
+        `@${username}`,
+
+      cartValue:
+        username
+    };
+  }
+
+  return {
+    displayLabel:
+      'BeatMarket Producer',
+
+    cartValue:
+      'BeatMarket Producer'
+  };
+}
+
 export default function ExplorePage() {
   const [beats, setBeats] =
     useState([]);
@@ -230,6 +270,11 @@ export default function ExplorePage() {
       return;
     }
 
+    const producerIdentity =
+      getProducerIdentity(
+        beat.profiles
+      );
+
     addToCart({
       /*
         Use the beat and license IDs together so each
@@ -257,8 +302,7 @@ export default function ExplorePage() {
         license.name,
 
       producer:
-        beat.profiles?.username ||
-        'Unknown'
+        producerIdentity.cartValue
     });
   }
 
@@ -297,6 +341,11 @@ export default function ExplorePage() {
                   'Exclusive'
               );
 
+            const producerIdentity =
+              getProducerIdentity(
+                beat.profiles
+              );
+
             const isSoldExclusive =
               Boolean(
                 beat.is_sold_exclusive
@@ -326,10 +375,10 @@ export default function ExplorePage() {
                     </h2>
 
                     <p className="text-sm text-gray-400">
-                      by @
-                      {beat.profiles
-                        ?.username ||
-                        'Unknown Producer'}
+                      by{' '}
+                      {
+                        producerIdentity.displayLabel
+                      }
                     </p>
                   </div>
 

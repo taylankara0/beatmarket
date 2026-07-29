@@ -6,7 +6,10 @@ import {
 } from '@supabase/supabase-js';
 
 import { createClient } from '@/lib/supabase-server';
-import { activateProducerProfile } from './actions';
+import {
+  activateProducerProfile,
+  saveProducerDisplayName,
+} from './actions';
 import {
   cancelProducerPayout,
   requestProducerPayout,
@@ -223,7 +226,7 @@ export default async function DashboardPage({
     error: profileError,
   } = await supabase
     .from('profiles')
-    .select('is_producer')
+    .select('is_producer, display_name')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -864,6 +867,101 @@ export default async function DashboardPage({
           {errorMessage}
         </div>
       )}
+
+      <section
+        style={{
+          marginBottom: '40px',
+          padding: '24px',
+          border: '1px solid #e5e7eb',
+          borderRadius: '12px',
+          background: '#fff',
+        }}
+      >
+        <h2
+          style={{
+            margin: '0 0 8px 0',
+            fontSize: '1.5rem',
+          }}
+        >
+          Producer Profile
+        </h2>
+
+        <p
+          style={{
+            margin: '0 0 20px 0',
+            color: '#666',
+            lineHeight: 1.5,
+          }}
+        >
+          Choose the public producer name shown on your beats
+          in the marketplace.
+        </p>
+
+        <form
+          action={saveProducerDisplayName}
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            gap: '12px',
+          }}
+        >
+          <div
+            style={{
+              flex: '1 1 280px',
+            }}
+          >
+            <label
+              htmlFor="display_name"
+              style={{
+                display: 'block',
+                marginBottom: '6px',
+                color: '#344054',
+                fontSize: '14px',
+                fontWeight: 'bold',
+              }}
+            >
+              Public Display Name
+            </label>
+
+            <input
+              id="display_name"
+              name="display_name"
+              type="text"
+              required
+              minLength={2}
+              maxLength={60}
+              defaultValue={profile.display_name ?? ''}
+              placeholder="Enter your producer name"
+              autoComplete="nickname"
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '11px 12px',
+                border: '1px solid #d0d5dd',
+                borderRadius: '8px',
+                fontSize: '14px',
+              }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            style={{
+              border: 'none',
+              borderRadius: '8px',
+              padding: '11px 18px',
+              background: '#111827',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            Save Display Name
+          </button>
+        </form>
+      </section>
 
       <section
         style={{
