@@ -1034,7 +1034,7 @@ export default async function DashboardPage({
                 fontSize: '1.15rem',
               }}
             >
-              Recent Paid Sales
+              Recent Sales
             </h3>
 
             {recentSales.length === 0 ? (

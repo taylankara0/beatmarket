@@ -89,13 +89,18 @@ export default async function LoginPage({
         )}
 
         <form
+          action={login}
           style={{
             display: 'flex',
             flexDirection: 'column',
             gap: '15px',
           }}
         >
-          <label>
+          <label
+            style={{
+              order: 1,
+            }}
+          >
             <strong>Email Address</strong>
 
             <input
@@ -116,7 +121,11 @@ export default async function LoginPage({
             />
           </label>
 
-          <label>
+          <label
+            style={{
+              order: 2,
+            }}
+          >
             <strong>Password</strong>
 
             <input
@@ -139,26 +148,8 @@ export default async function LoginPage({
 
           <button
             type="submit"
-            formAction={requestPasswordReset}
-            formNoValidate
             style={{
-              alignSelf: 'flex-end',
-              padding: 0,
-              border: 'none',
-              background: 'none',
-              color: '#0070f3',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              fontSize: '14px',
-            }}
-          >
-            Forgot password?
-          </button>
-
-          <button
-            type="submit"
-            formAction={login}
-            style={{
+              order: 4,
               width: '100%',
               padding: '12px',
               marginTop: '5px',
@@ -172,6 +163,25 @@ export default async function LoginPage({
             }}
           >
             Sign In
+          </button>
+
+          <button
+            type="submit"
+            formAction={requestPasswordReset}
+            formNoValidate
+            style={{
+              order: 3,
+              alignSelf: 'flex-end',
+              padding: 0,
+              border: 'none',
+              background: 'none',
+              color: '#0070f3',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              fontSize: '14px',
+            }}
+          >
+            Forgot password?
           </button>
         </form>
 

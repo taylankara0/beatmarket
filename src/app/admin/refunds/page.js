@@ -1789,7 +1789,7 @@ export default async function AdminRefundsPage({
                               'pointer',
                           }}
                         >
-                          Process Iyzico Refund
+                          Process Refund
                         </button>
                       </form>
                     )}

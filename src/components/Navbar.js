@@ -1,29 +1,47 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase-client';
+import {
+  useEffect,
+  useState,
+} from 'react';
+import { usePathname } from 'next/navigation';
+
 import { signOutAction } from '@/app/actions';
 import { useCart } from '@/context/CartContext';
+import { createClient } from '@/lib/supabase-client';
 
 function isMissingSessionError(error) {
   return (
-    error?.name === 'AuthSessionMissingError' ||
-    error?.message === 'Auth session missing!' ||
-    error?.code === 'session_not_found'
+    error?.name ===
+      'AuthSessionMissingError' ||
+    error?.message ===
+      'Auth session missing!' ||
+    error?.code ===
+      'session_not_found'
   );
 }
 
 export default function Navbar() {
-  const [user, setUser] = useState(null);
-  const [isProducer, setIsProducer] = useState(false);
+  const pathname = usePathname();
+
+  const [user, setUser] =
+    useState(null);
+
+  const [
+    isProducer,
+    setIsProducer,
+  ] = useState(false);
+
   const { cart } = useCart();
 
   useEffect(() => {
     const supabase = createClient();
     let isMounted = true;
 
-    async function loadProducerStatus(currentUser) {
+    async function loadProducerStatus(
+      currentUser
+    ) {
       if (!currentUser) {
         if (isMounted) {
           setIsProducer(false);
@@ -55,21 +73,30 @@ export default function Navbar() {
         return;
       }
 
-      setIsProducer(profile?.is_producer === true);
+      setIsProducer(
+        profile?.is_producer === true
+      );
     }
 
     async function loadUser() {
       const {
-        data: { user: currentUser },
+        data: {
+          user: currentUser,
+        },
         error: userError,
-      } = await supabase.auth.getUser();
+      } =
+        await supabase.auth.getUser();
 
       if (!isMounted) {
         return;
       }
 
       if (userError) {
-        if (!isMissingSessionError(userError)) {
+        if (
+          !isMissingSessionError(
+            userError
+          )
+        ) {
           console.error(
             'Navbar user loading error:',
             userError
@@ -82,31 +109,73 @@ export default function Navbar() {
       }
 
       setUser(currentUser);
-      await loadProducerStatus(currentUser);
+
+      await loadProducerStatus(
+        currentUser
+      );
+    }
+
+    function handleWindowFocus() {
+      void loadUser();
+    }
+
+    function handleVisibilityChange() {
+      if (
+        document.visibilityState ===
+        'visible'
+      ) {
+        void loadUser();
+      }
     }
 
     void loadUser();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        const currentUser = session?.user ?? null;
+    } =
+      supabase.auth.onAuthStateChange(
+        (_event, session) => {
+          const currentUser =
+            session?.user ?? null;
 
-        if (!isMounted) {
-          return;
+          if (!isMounted) {
+            return;
+          }
+
+          setUser(currentUser);
+
+          void loadProducerStatus(
+            currentUser
+          );
         }
+      );
 
-        setUser(currentUser);
-        void loadProducerStatus(currentUser);
-      }
+    window.addEventListener(
+      'focus',
+      handleWindowFocus
+    );
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibilityChange
     );
 
     return () => {
       isMounted = false;
+
       subscription.unsubscribe();
+
+      window.removeEventListener(
+        'focus',
+        handleWindowFocus
+      );
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange
+      );
     };
-  }, []);
+  }, [pathname]);
 
   const navStyle = {
     display: 'flex',
