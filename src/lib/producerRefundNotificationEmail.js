@@ -442,7 +442,7 @@ function groupItemsByProducer(
   ];
 }
 
-async function getProducerEmail({
+async function getProducerContact({
   supabase,
   producerId,
 }) {
@@ -469,7 +469,51 @@ async function getProducerEmail({
     );
   }
 
-  return producerEmail;
+  const {
+    data: profile,
+    error: profileError,
+  } = await supabase
+    .from('profiles')
+    .select(`
+      display_name,
+      username
+    `)
+    .eq('id', producerId)
+    .maybeSingle();
+
+  if (profileError) {
+    logWarning(
+      'producer_refund_profile_name_load_failed',
+      {
+        producerId,
+        errorMessage:
+          profileError.message,
+      }
+    );
+  }
+
+  const displayName =
+    String(
+      profile?.display_name || ''
+    )
+      .trim()
+      .replace(/\s+/g, ' ');
+
+  const username =
+    String(
+      profile?.username || ''
+    ).trim();
+
+  const producerName =
+    displayName ||
+    (username
+      ? `@${username}`
+      : 'BeatMarket Producer');
+
+  return {
+    producerEmail,
+    producerName,
+  };
 }
 
 async function claimDelivery({
@@ -719,6 +763,7 @@ function buildEmailContent({
   refund,
   order,
   producerItems,
+  producerName,
   baseUrl,
 }) {
   const currency =
@@ -852,6 +897,10 @@ function buildEmailContent({
               </h1>
 
               <p style="margin: 16px 0 0; color: #4b5563; line-height: 1.6;">
+                Hello ${escapeHtml(producerName)},
+              </p>
+
+              <p style="margin: 12px 0 0; color: #4b5563; line-height: 1.6;">
                 A completed refund included your beat${producerItems.length === 1 ? '' : 's'}. The related producer earnings were reversed.
               </p>
 
@@ -971,6 +1020,8 @@ function buildEmailContent({
   const text = [
     'BeatMarket',
     '',
+    `Hello ${producerName},`,
+    '',
     'A sale was refunded.',
     '',
     `Order: ${publicOrderId}`,
@@ -1061,11 +1112,13 @@ async function sendProducerGroupEmail({
       };
     }
 
-    const producerEmail =
-      await getProducerEmail({
-        supabase,
-        producerId,
-      });
+    const {
+      producerEmail,
+      producerName,
+    } = await getProducerContact({
+      supabase,
+      producerId,
+    });
 
     const resend =
       getResendClient();
@@ -1081,6 +1134,7 @@ async function sendProducerGroupEmail({
         refund,
         order,
         producerItems: items,
+        producerName,
         baseUrl,
       });
 
