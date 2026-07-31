@@ -410,28 +410,83 @@ Do not attempt a Production Auth restore without a separate recovery plan and co
 
 5. Recommended manual backup routine
 
-Until automated encrypted off-device backups are available, run all three backup procedures:
+## Complete one-command backup
 
-Before a major database migration
-Before changing payment or refund logic
-Before changing storage behavior
-Before bulk data changes
-Before launch
-After major Production data changes
-At least once per week while Production data is active
+The preferred manual backup command runs all backup procedures in sequence and verifies the newly created R2 backup.
 
-Recommended order:
+Script:
 
-Supabase public database backup
-Supabase Auth backup
-Cloudflare R2 backup
-R2 verification-only check
+```text
+scripts/backup-all.ps1
+```
 
-Keep each backup’s checksum file with its matching backup.
+Environment: PowerShell
+
+Run the command from:
+
+```text
+D:\Masaüstü\BeatMarket
+```
+
+Command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\backup-all.ps1"
+```
+
+The command performs:
+
+1. Supabase public database backup
+2. Supabase Auth metadata backup
+3. Cloudflare R2 object backup
+4. Verification of the newly created R2 backup
+
+The Supabase database password is requested interactively and is not stored by the script.
+
+A successful run ends with:
+
+```text
+ALL_BACKUPS_SUCCESSFUL
+```
+
+The generated backups are stored in:
+
+```text
+D:\Masaüstü\BeatMarket-Backups
+D:\Masaüstü\BeatMarket-Auth-Backups
+D:\Masaüstü\BeatMarket-R2-Backups
+```
+
+## When to create backups
+
+Run the complete backup command:
+
+- Before a major database migration
+- Before changing payment or refund logic
+- Before changing storage behavior
+- Before bulk data changes
+- Before launch
+- After major Production data changes
+- At least once per week while Production data is active
+
+## Backup integrity rules
+
+Keep every checksum file with its matching backup.
 
 Do not rename individual files inside an R2 backup directory.
 
-Do not modify manifest.json.
+Do not modify:
+
+```text
+manifest.json
+manifest.json.sha256
+auth-users.json
+auth-users.json.sha256
+```
+
+Never commit generated backups to GitHub.
+
+The current backups remain on the same computer. An encrypted off-device backup is still required for protection against disk failure, theft, or physical damage.
 
 6. Recovery order
 
