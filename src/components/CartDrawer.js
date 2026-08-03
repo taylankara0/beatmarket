@@ -3,12 +3,15 @@
 import {
   useEffect,
   useRef,
-  useState
+  useState,
 } from 'react';
 
 import {
-  useCart
+  useCart,
 } from '@/context/CartContext';
+
+const FREE_PLATFORM_RELEASE =
+  true;
 
 const CHECKOUT_ATTEMPT_STORAGE_KEY =
   'beatmarket_checkout_attempt';
@@ -19,82 +22,121 @@ const CHECKOUT_ATTEMPT_MAX_AGE_MS =
 function createIdempotencyKey() {
   if (
     typeof crypto !== 'undefined' &&
-    typeof crypto.randomUUID === 'function'
+    typeof crypto.randomUUID ===
+      'function'
   ) {
     return crypto.randomUUID();
   }
 
-  const randomBytes = new Uint8Array(16);
-  crypto.getRandomValues(randomBytes);
+  const randomBytes =
+    new Uint8Array(16);
 
-  randomBytes[6] =
-    (randomBytes[6] & 0x0f) | 0x40;
-
-  randomBytes[8] =
-    (randomBytes[8] & 0x3f) | 0x80;
-
-  const hexadecimalBytes = Array.from(
-    randomBytes,
-    (byte) =>
-      byte
-        .toString(16)
-        .padStart(2, '0')
+  crypto.getRandomValues(
+    randomBytes
   );
 
+  randomBytes[6] =
+    (randomBytes[6] & 0x0f) |
+    0x40;
+
+  randomBytes[8] =
+    (randomBytes[8] & 0x3f) |
+    0x80;
+
+  const hexadecimalBytes =
+    Array.from(
+      randomBytes,
+      (byte) =>
+        byte
+          .toString(16)
+          .padStart(2, '0')
+    );
+
   return [
-    hexadecimalBytes.slice(0, 4).join(''),
-    hexadecimalBytes.slice(4, 6).join(''),
-    hexadecimalBytes.slice(6, 8).join(''),
-    hexadecimalBytes.slice(8, 10).join(''),
-    hexadecimalBytes.slice(10, 16).join(''),
+    hexadecimalBytes
+      .slice(0, 4)
+      .join(''),
+
+    hexadecimalBytes
+      .slice(4, 6)
+      .join(''),
+
+    hexadecimalBytes
+      .slice(6, 8)
+      .join(''),
+
+    hexadecimalBytes
+      .slice(8, 10)
+      .join(''),
+
+    hexadecimalBytes
+      .slice(10, 16)
+      .join(''),
   ].join('-');
 }
 
-function createCartFingerprint(cart) {
-  const normalizedItems = cart
-    .map((item) => {
-      const beatId =
-        item.beatId ??
-        item.beat_id ??
-        item.beat?.id ??
-        item.id ??
-        '';
+function createCartFingerprint(
+  cart
+) {
+  const normalizedItems =
+    cart
+      .map((item) => {
+        const beatId =
+          item.beatId ??
+          item.beat_id ??
+          item.beat?.id ??
+          item.id ??
+          '';
 
-      const licenseId =
-        item.licenseId ??
-        item.license_id ??
-        item.license?.id ??
-        '';
+        const licenseId =
+          item.licenseId ??
+          item.license_id ??
+          item.license?.id ??
+          '';
 
-      return {
-        beatId: String(beatId),
-        licenseId: String(licenseId),
-      };
-    })
-    .sort((firstItem, secondItem) => {
-      const firstKey =
-        `${firstItem.beatId}:${firstItem.licenseId}`;
+        return {
+          beatId:
+            String(beatId),
 
-      const secondKey =
-        `${secondItem.beatId}:${secondItem.licenseId}`;
+          licenseId:
+            String(licenseId),
+        };
+      })
+      .sort(
+        (
+          firstItem,
+          secondItem
+        ) => {
+          const firstKey =
+            `${firstItem.beatId}:${firstItem.licenseId}`;
 
-      return firstKey.localeCompare(
-        secondKey
+          const secondKey =
+            `${secondItem.beatId}:${secondItem.licenseId}`;
+
+          return firstKey.localeCompare(
+            secondKey
+          );
+        }
       );
-    });
 
-  return JSON.stringify(normalizedItems);
+  return JSON.stringify(
+    normalizedItems
+  );
 }
 
 function removeStoredCheckoutAttempt() {
-  if (typeof window === 'undefined') {
+  if (
+    typeof window ===
+    'undefined'
+  ) {
     return;
   }
 
   try {
-    window.sessionStorage.removeItem(
-      CHECKOUT_ATTEMPT_STORAGE_KEY
-    );
+    window.sessionStorage
+      .removeItem(
+        CHECKOUT_ATTEMPT_STORAGE_KEY
+      );
   } catch {
     /*
       Checkout can continue even when
@@ -103,37 +145,55 @@ function removeStoredCheckoutAttempt() {
   }
 }
 
-function getCheckoutIdempotencyKey(cart) {
+function getCheckoutIdempotencyKey(
+  cart
+) {
   const cartFingerprint =
-    createCartFingerprint(cart);
+    createCartFingerprint(
+      cart
+    );
 
-  if (typeof window !== 'undefined') {
+  if (
+    typeof window !==
+    'undefined'
+  ) {
     try {
       const savedValue =
-        window.sessionStorage.getItem(
-          CHECKOUT_ATTEMPT_STORAGE_KEY
-        );
+        window.sessionStorage
+          .getItem(
+            CHECKOUT_ATTEMPT_STORAGE_KEY
+          );
 
       if (savedValue) {
         const savedAttempt =
-          JSON.parse(savedValue);
+          JSON.parse(
+            savedValue
+          );
 
         const createdAt =
-          Number(savedAttempt?.createdAt);
+          Number(
+            savedAttempt?.createdAt
+          );
 
         const attemptIsCurrent =
-          Number.isFinite(createdAt) &&
-          Date.now() - createdAt <
+          Number.isFinite(
+            createdAt
+          ) &&
+          Date.now() -
+            createdAt <
             CHECKOUT_ATTEMPT_MAX_AGE_MS;
 
         if (
           attemptIsCurrent &&
-          savedAttempt?.cartFingerprint ===
+          savedAttempt
+            ?.cartFingerprint ===
             cartFingerprint &&
-          typeof savedAttempt?.idempotencyKey ===
+          typeof savedAttempt
+            ?.idempotencyKey ===
             'string'
         ) {
-          return savedAttempt.idempotencyKey;
+          return savedAttempt
+            .idempotencyKey;
         }
       }
     } catch {
@@ -144,16 +204,21 @@ function getCheckoutIdempotencyKey(cart) {
   const idempotencyKey =
     createIdempotencyKey();
 
-  if (typeof window !== 'undefined') {
+  if (
+    typeof window !==
+    'undefined'
+  ) {
     try {
-      window.sessionStorage.setItem(
-        CHECKOUT_ATTEMPT_STORAGE_KEY,
-        JSON.stringify({
-          idempotencyKey,
-          cartFingerprint,
-          createdAt: Date.now(),
-        })
-      );
+      window.sessionStorage
+        .setItem(
+          CHECKOUT_ATTEMPT_STORAGE_KEY,
+          JSON.stringify({
+            idempotencyKey,
+            cartFingerprint,
+            createdAt:
+              Date.now(),
+          })
+        );
     } catch {
       /*
         The request can still use the
@@ -166,25 +231,29 @@ function getCheckoutIdempotencyKey(cart) {
 }
 
 export default function CartDrawer() {
-  const [isOpen, setIsOpen] =
-    useState(false);
+  const [
+    isOpen,
+    setIsOpen,
+  ] = useState(false);
 
-  const [loading, setLoading] =
-    useState(false);
+  const [
+    loading,
+    setLoading,
+  ] = useState(false);
 
   const [
     paymentModeLoading,
-    setPaymentModeLoading
+    setPaymentModeLoading,
   ] = useState(true);
 
   const [
     paymentsEnabled,
-    setPaymentsEnabled
+    setPaymentsEnabled,
   ] = useState(false);
 
   const [
     paymentMode,
-    setPaymentMode
+    setPaymentMode,
   ] = useState('disabled');
 
   const checkoutInProgressRef =
@@ -205,22 +274,27 @@ export default function CartDrawer() {
       new AbortController();
 
     async function loadPaymentMode() {
-      setPaymentModeLoading(true);
+      setPaymentModeLoading(
+        true
+      );
 
       try {
-        const response = await fetch(
-          '/api/payment-mode',
-          {
-            method: 'GET',
-            cache: 'no-store',
-            signal:
-              abortController.signal,
-          }
-        );
+        const response =
+          await fetch(
+            '/api/payment-mode',
+            {
+              method: 'GET',
+              cache: 'no-store',
+              signal:
+                abortController
+                  .signal,
+            }
+          );
 
-        const data = await response
-          .json()
-          .catch(() => null);
+        const data =
+          await response
+            .json()
+            .catch(() => null);
 
         if (
           !response.ok ||
@@ -239,7 +313,8 @@ export default function CartDrawer() {
         );
 
         setPaymentsEnabled(
-          data.paymentsEnabled === true
+          data.paymentsEnabled ===
+            true
         );
       } catch (error) {
         if (
@@ -258,120 +333,147 @@ export default function CartDrawer() {
           Fail closed. A frontend status
           error must never enable checkout.
         */
-        setPaymentMode('disabled');
-        setPaymentsEnabled(false);
+        setPaymentMode(
+          'disabled'
+        );
+
+        setPaymentsEnabled(
+          false
+        );
       } finally {
         if (
-          !abortController.signal.aborted
+          !abortController
+            .signal.aborted
         ) {
-          setPaymentModeLoading(false);
+          setPaymentModeLoading(
+            false
+          );
         }
       }
     }
 
-    loadPaymentMode();
+    void loadPaymentMode();
 
     return () => {
       abortController.abort();
     };
   }, [isOpen]);
 
-  const handleCheckout = async () => {
-    if (cart.length === 0) {
-      alert('Sepet boş!');
-      return;
-    }
-
-    if (
-      paymentModeLoading ||
-      !paymentsEnabled
-    ) {
-      alert(
-        'Payments are not currently available.'
-      );
-
-      return;
-    }
-
-    if (checkoutInProgressRef.current) {
-      return;
-    }
-
-    checkoutInProgressRef.current = true;
-    setLoading(true);
-
-    const idempotencyKey =
-      getCheckoutIdempotencyKey(cart);
-
-    try {
-      const response = await fetch(
-        '/api/checkout/iyzico',
-        {
-          method: 'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json',
-
-            'Idempotency-Key':
-              idempotencyKey,
-          },
-
-          body: JSON.stringify({
-            items: cart,
-          }),
-        }
-      );
-
-      const data = await response
-        .json()
-        .catch(() => null);
+  const handleCheckout =
+    async () => {
+      if (
+        cart.length === 0
+      ) {
+        alert('Sepet boş!');
+        return;
+      }
 
       if (
-        response.ok &&
-        data?.success &&
-        data?.paymentPageUrl
+        paymentModeLoading ||
+        !paymentsEnabled
       ) {
-        window.location.assign(
-          data.paymentPageUrl
+        alert(
+          'Payments are not currently available.'
         );
 
         return;
       }
 
-      /*
-        Keep the same key only when the backend says that
-        the original request is still being processed.
-      */
-      if (!data?.retryable) {
-        removeStoredCheckoutAttempt();
+      if (
+        checkoutInProgressRef
+          .current
+      ) {
+        return;
       }
 
-      alert(
-        `Hata: ${
-          data?.error ||
-          'Ödeme işlemi başlatılamadı.'
-        }`
-      );
-    } catch (error) {
-      /*
-        Keep the key after a network failure. The backend may
-        have processed the request even though the response
-        did not reach the browser.
-      */
-      console.error(
-        'Checkout connection error:',
-        error
-      );
+      checkoutInProgressRef
+        .current = true;
 
-      alert('Bağlantı hatası.');
-    } finally {
-      checkoutInProgressRef.current =
-        false;
+      setLoading(true);
 
-      setLoading(false);
-    }
-  };
+      const idempotencyKey =
+        getCheckoutIdempotencyKey(
+          cart
+        );
+
+      try {
+        const response =
+          await fetch(
+            '/api/checkout/iyzico',
+            {
+              method: 'POST',
+
+              headers: {
+                'Content-Type':
+                  'application/json',
+
+                'Idempotency-Key':
+                  idempotencyKey,
+              },
+
+              body:
+                JSON.stringify({
+                  items: cart,
+                }),
+            }
+          );
+
+        const data =
+          await response
+            .json()
+            .catch(() => null);
+
+        if (
+          response.ok &&
+          data?.success &&
+          data?.paymentPageUrl
+        ) {
+          window.location.assign(
+            data.paymentPageUrl
+          );
+
+          return;
+        }
+
+        /*
+          Keep the same key only when
+          the backend says that the
+          original request is still
+          being processed.
+        */
+        if (!data?.retryable) {
+          removeStoredCheckoutAttempt();
+        }
+
+        alert(
+          `Hata: ${
+            data?.error ||
+            'Ödeme işlemi başlatılamadı.'
+          }`
+        );
+      } catch (error) {
+        /*
+          Keep the key after a network
+          failure. The backend may have
+          processed the request even
+          though the response did not
+          reach the browser.
+        */
+        console.error(
+          'Checkout connection error:',
+          error
+        );
+
+        alert(
+          'Bağlantı hatası.'
+        );
+      } finally {
+        checkoutInProgressRef
+          .current = false;
+
+        setLoading(false);
+      }
+    };
 
   const checkoutDisabled =
     loading ||
@@ -385,22 +487,40 @@ export default function CartDrawer() {
   if (loading) {
     checkoutButtonText =
       'Bağlanıyor...';
-  } else if (paymentModeLoading) {
+  } else if (
+    paymentModeLoading
+  ) {
     checkoutButtonText =
       'Ödeme Durumu Kontrol Ediliyor...';
-  } else if (!paymentsEnabled) {
+  } else if (
+    !paymentsEnabled
+  ) {
     checkoutButtonText =
       'Payments Coming Soon';
   } else if (
-    paymentMode === 'sandbox'
+    paymentMode ===
+    'sandbox'
   ) {
     checkoutButtonText =
       'Iyzico ile Test Ödemesi';
   }
 
+  /*
+    The complete checkout interface and
+    logic are intentionally preserved for
+    a possible future paid release.
+
+    During the free beat-sharing release,
+    the cart drawer is not rendered.
+  */
+  if (FREE_PLATFORM_RELEASE) {
+    return null;
+  }
+
   return (
     <>
       <button
+        type="button"
         onClick={() =>
           setIsOpen(
             (currentValue) =>
@@ -414,13 +534,16 @@ export default function CartDrawer() {
           background: '#0070f3',
           color: '#fff',
           padding: '16px 24px',
+          border: 'none',
           borderRadius: 50,
           cursor: 'pointer',
           zIndex: 999,
         }}
       >
         Sepet ({cart.length}) —{' '}
-        {(Number(cartTotal) || 0).toFixed(2)}₺
+        {(Number(cartTotal) || 0)
+          .toFixed(2)}
+        ₺
       </button>
 
       {isOpen && (
@@ -444,12 +567,16 @@ export default function CartDrawer() {
               display: 'flex',
               justifyContent:
                 'space-between',
-              alignItems: 'center',
+              alignItems:
+                'center',
             }}
           >
-            <h2>Sepetiniz</h2>
+            <h2>
+              Sepetiniz
+            </h2>
 
             <button
+              type="button"
               onClick={() =>
                 setIsOpen(false)
               }
@@ -461,7 +588,8 @@ export default function CartDrawer() {
           {cart.length === 0 ? (
             <p
               style={{
-                marginTop: '20px',
+                marginTop:
+                  '20px',
                 color: '#666',
               }}
             >
@@ -472,10 +600,12 @@ export default function CartDrawer() {
               <div
                 key={item.id}
                 style={{
-                  display: 'flex',
+                  display:
+                    'flex',
                   justifyContent:
                     'space-between',
-                  padding: '10px 0',
+                  padding:
+                    '10px 0',
                   borderBottom:
                     '1px solid #eee',
                 }}
@@ -485,19 +615,28 @@ export default function CartDrawer() {
                   <br />
 
                   <small>
-                    {item.licenseType}
+                    {
+                      item.licenseType
+                    }
                   </small>
                 </div>
 
                 <div
                   style={{
-                    textAlign: 'right',
+                    textAlign:
+                      'right',
                   }}
                 >
-                  {(Number(item.price) || 0).toFixed(2)}₺
+                  {(
+                    Number(
+                      item.price
+                    ) || 0
+                  ).toFixed(2)}
+                  ₺
                   <br />
 
                   <button
+                    type="button"
                     onClick={() =>
                       removeFromCart(
                         item.id
@@ -506,8 +645,10 @@ export default function CartDrawer() {
                     style={{
                       color: 'red',
                       border: 'none',
-                      background: 'none',
-                      cursor: 'pointer',
+                      background:
+                        'none',
+                      cursor:
+                        'pointer',
                     }}
                   >
                     Sil
@@ -519,30 +660,45 @@ export default function CartDrawer() {
 
           <div
             style={{
-              marginTop: '20px',
-              fontWeight: 'bold',
+              marginTop:
+                '20px',
+              fontWeight:
+                'bold',
             }}
           >
             Toplam:{' '}
-            {(Number(cartTotal) || 0).toFixed(2)}₺
+            {(
+              Number(
+                cartTotal
+              ) || 0
+            ).toFixed(2)}
+            ₺
           </div>
 
           {!paymentModeLoading &&
             !paymentsEnabled && (
               <div
                 style={{
-                  marginTop: '14px',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  background: '#fef3c7',
-                  color: '#92400e',
-                  fontSize: '14px',
-                  lineHeight: 1.5,
+                  marginTop:
+                    '14px',
+                  padding:
+                    '12px',
+                  borderRadius:
+                    '8px',
+                  background:
+                    '#fef3c7',
+                  color:
+                    '#92400e',
+                  fontSize:
+                    '14px',
+                  lineHeight:
+                    1.5,
                 }}
               >
-                Payments are currently
-                disabled. You can still
-                review and manage your cart.
+                Payments are
+                currently disabled.
+                You can still review
+                and manage your cart.
               </div>
             )}
 
@@ -552,24 +708,37 @@ export default function CartDrawer() {
               'sandbox' && (
               <div
                 style={{
-                  marginTop: '14px',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  background: '#dbeafe',
-                  color: '#1e40af',
-                  fontSize: '14px',
-                  lineHeight: 1.5,
+                  marginTop:
+                    '14px',
+                  padding:
+                    '12px',
+                  borderRadius:
+                    '8px',
+                  background:
+                    '#dbeafe',
+                  color:
+                    '#1e40af',
+                  fontSize:
+                    '14px',
+                  lineHeight:
+                    1.5,
                 }}
               >
-                Test payment mode is active.
-                No real payment will be
+                Test payment mode
+                is active. No real
+                payment will be
                 processed.
               </div>
             )}
 
           <button
-            onClick={handleCheckout}
-            disabled={checkoutDisabled}
+            type="button"
+            onClick={
+              handleCheckout
+            }
+            disabled={
+              checkoutDisabled
+            }
             style={{
               width: '100%',
               background:
@@ -578,9 +747,11 @@ export default function CartDrawer() {
                   : '#22c55e',
               color: '#fff',
               padding: '10px',
-              marginTop: '10px',
+              marginTop:
+                '10px',
               border: 'none',
-              borderRadius: '5px',
+              borderRadius:
+                '5px',
               cursor:
                 checkoutDisabled
                   ? 'not-allowed'

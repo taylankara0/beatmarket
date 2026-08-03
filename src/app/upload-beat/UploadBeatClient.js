@@ -3,36 +3,36 @@
 import { useState } from 'react';
 
 const MEGABYTE = 1024 * 1024;
-const PREVIEW_MAX_BYTES = 25 * MEGABYTE;
-const MASTER_MAX_BYTES = 250 * MEGABYTE;
+const PREVIEW_MAX_BYTES =
+  25 * MEGABYTE;
+const MASTER_MAX_BYTES =
+  250 * MEGABYTE;
 
-export default function UploadBeatPage() {
-  const [title, setTitle] = useState('');
+export default function UploadBeatClient() {
+  const [title, setTitle] =
+    useState('');
 
-  const [priceBasic, setPriceBasic] =
-    useState('29.99');
-
-  const [
-    priceExclusive,
-    setPriceExclusive
-  ] = useState('199.99');
-
-  const [bpm, setBpm] = useState('');
-
-  const [previewFile, setPreviewFile] =
-    useState(null);
+  const [bpm, setBpm] =
+    useState('');
 
   const [
-    untaggedFile,
-    setUntaggedFile
+    previewFile,
+    setPreviewFile,
   ] = useState(null);
 
-  const [uploading, setUploading] =
-    useState(false);
+  const [
+    masterFile,
+    setMasterFile,
+  ] = useState(null);
+
+  const [
+    uploading,
+    setUploading,
+  ] = useState(false);
 
   const [
     statusMessage,
-    setStatusMessage
+    setStatusMessage,
   ] = useState('');
 
   function sanitizeFilename(name) {
@@ -107,7 +107,9 @@ export default function UploadBeatPage() {
     }
 
     if (
-      !Number.isSafeInteger(file.size) ||
+      !Number.isSafeInteger(
+        file.size
+      ) ||
       file.size <= 0
     ) {
       throw new Error(
@@ -115,7 +117,10 @@ export default function UploadBeatPage() {
       );
     }
 
-    if (file.size > maximumBytes) {
+    if (
+      file.size >
+      maximumBytes
+    ) {
       throw new Error(
         `The ${uploadType} file cannot exceed ${formatMegabytes(
           maximumBytes
@@ -165,13 +170,13 @@ export default function UploadBeatPage() {
         'audio/wave',
         'audio/vnd.wave',
         'audio/flac',
-        'audio/x-flac'
+        'audio/x-flac',
       ];
 
       const allowedExtensions = [
         'mp3',
         'wav',
-        'flac'
+        'flac',
       ];
 
       if (
@@ -183,7 +188,7 @@ export default function UploadBeatPage() {
         )
       ) {
         throw new Error(
-          'The master track must be an MP3, WAV, or FLAC file.'
+          'The download master must be an MP3, WAV, or FLAC file.'
         );
       }
 
@@ -236,11 +241,15 @@ export default function UploadBeatPage() {
 
     return new File(
       [file],
-      sanitizeFilename(file.name),
+      sanitizeFilename(
+        file.name
+      ),
       {
-        type: contentType,
+        type:
+          contentType,
+
         lastModified:
-          file.lastModified
+          file.lastModified,
       }
     );
   }
@@ -263,20 +272,13 @@ export default function UploadBeatPage() {
       );
     }
 
-    /*
-      Request a short-lived upload URL from the secured
-      server endpoint.
-
-      The server receives the intended file role and
-      exact browser-reported file size.
-    */
     const authorizationResponse =
       await fetch('/api/upload', {
         method: 'POST',
 
         headers: {
           'Content-Type':
-            'application/json'
+            'application/json',
         },
 
         body: JSON.stringify({
@@ -288,8 +290,8 @@ export default function UploadBeatPage() {
           uploadType,
 
           fileSize:
-            file.size
-        })
+            file.size,
+        }),
       });
 
     const authorizationBody =
@@ -315,7 +317,10 @@ export default function UploadBeatPage() {
     const uploadHeaders =
       authorizationBody?.uploadHeaders;
 
-    if (!uploadUrl || !fileKey) {
+    if (
+      !uploadUrl ||
+      !fileKey
+    ) {
       throw new Error(
         `The upload URL or storage key is missing for ${file.name}.`
       );
@@ -323,8 +328,11 @@ export default function UploadBeatPage() {
 
     if (
       !uploadHeaders ||
-      typeof uploadHeaders !== 'object' ||
-      Array.isArray(uploadHeaders)
+      typeof uploadHeaders !==
+        'object' ||
+      Array.isArray(
+        uploadHeaders
+      )
     ) {
       throw new Error(
         `The required signed upload headers are missing for ${file.name}.`
@@ -336,7 +344,7 @@ export default function UploadBeatPage() {
       'x-amz-meta-owner',
       'x-amz-meta-originalfilename',
       'x-amz-meta-uploadtype',
-      'x-amz-meta-expectedbytes'
+      'x-amz-meta-expectedbytes',
     ];
 
     const hasAllRequiredHeaders =
@@ -357,31 +365,28 @@ export default function UploadBeatPage() {
     }
 
     if (
-      uploadHeaders['Content-Type'] !==
-      contentType
+      uploadHeaders[
+        'Content-Type'
+      ] !== contentType
     ) {
       throw new Error(
         `The signed Content-Type does not match ${file.name}.`
       );
     }
 
-    /*
-      Upload the actual file directly to private R2 storage.
-
-      Every signed metadata header returned by /api/upload
-      must be included exactly as received. The browser sets
-      Content-Length automatically from the File body.
-    */
     const uploadResult =
-      await fetch(uploadUrl, {
-        method: 'PUT',
+      await fetch(
+        uploadUrl,
+        {
+          method: 'PUT',
 
-        headers:
-          uploadHeaders,
+          headers:
+            uploadHeaders,
 
-        body:
-          file
-      });
+          body:
+            file,
+        }
+      );
 
     if (!uploadResult.ok) {
       throw new Error(
@@ -392,38 +397,34 @@ export default function UploadBeatPage() {
     return fileKey;
   }
 
-  async function publishBeat({
-    title,
-    bpm,
-    basicPrice,
-    exclusivePrice,
+  async function publishFreeBeat({
+    title: beatTitle,
+    bpm: beatBpm,
     previewKey,
-    masterKey
+    masterKey,
   }) {
-    /*
-      The authenticated server route creates the beat and
-      licenses. The browser never supplies a producer ID
-      or writes directly to Supabase.
-    */
     const response =
       await fetch(
-        '/api/beats/publish',
+        '/api/beats/publish-free',
         {
           method: 'POST',
 
           headers: {
             'Content-Type':
-              'application/json'
+              'application/json',
           },
 
           body: JSON.stringify({
-            title,
-            bpm,
-            basicPrice,
-            exclusivePrice,
+            title:
+              beatTitle,
+
+            bpm:
+              beatBpm,
+
             previewKey,
-            masterKey
-          })
+
+            masterKey,
+          }),
         }
       );
 
@@ -435,7 +436,7 @@ export default function UploadBeatPage() {
     if (!response.ok) {
       throw new Error(
         responseBody?.error ||
-          'The beat could not be published.'
+          'The free beat could not be published.'
       );
     }
 
@@ -476,6 +477,7 @@ export default function UploadBeatPage() {
       setStatusMessage('');
     } catch (error) {
       event.target.value = '';
+
       setPreviewFile(null);
 
       setStatusMessage(
@@ -496,7 +498,7 @@ export default function UploadBeatPage() {
       null;
 
     if (!selectedFile) {
-      setUntaggedFile(null);
+      setMasterFile(null);
       return;
     }
 
@@ -506,14 +508,15 @@ export default function UploadBeatPage() {
         'master'
       );
 
-      setUntaggedFile(
+      setMasterFile(
         selectedFile
       );
 
       setStatusMessage('');
     } catch (error) {
       event.target.value = '';
-      setUntaggedFile(null);
+
+      setMasterFile(null);
 
       setStatusMessage(
         `❌ ${
@@ -525,7 +528,9 @@ export default function UploadBeatPage() {
     }
   }
 
-  async function handleSubmit(event) {
+  async function handleSubmit(
+    event
+  ) {
     event.preventDefault();
 
     const form =
@@ -533,10 +538,10 @@ export default function UploadBeatPage() {
 
     if (
       !previewFile ||
-      !untaggedFile
+      !masterFile
     ) {
       setStatusMessage(
-        '❌ Please select both a preview track and an untagged master track.'
+        '❌ Please select both a streaming preview and a download master.'
       );
 
       return;
@@ -544,12 +549,6 @@ export default function UploadBeatPage() {
 
     const trimmedTitle =
       title.trim();
-
-    const basicPrice =
-      Number(priceBasic);
-
-    const exclusivePrice =
-      Number(priceExclusive);
 
     const parsedBpm =
       bpm.trim() === ''
@@ -565,47 +564,11 @@ export default function UploadBeatPage() {
     }
 
     if (
-      trimmedTitle.length > 120
+      trimmedTitle.length >
+      120
     ) {
       setStatusMessage(
         '❌ The beat title cannot exceed 120 characters.'
-      );
-
-      return;
-    }
-
-    if (
-      !Number.isFinite(
-        basicPrice
-      ) ||
-      basicPrice <= 0
-    ) {
-      setStatusMessage(
-        '❌ Please enter a valid Basic license price.'
-      );
-
-      return;
-    }
-
-    if (
-      !Number.isFinite(
-        exclusivePrice
-      ) ||
-      exclusivePrice <= 0
-    ) {
-      setStatusMessage(
-        '❌ Please enter a valid Exclusive license price.'
-      );
-
-      return;
-    }
-
-    if (
-      exclusivePrice <=
-      basicPrice
-    ) {
-      setStatusMessage(
-        '❌ The Exclusive license price must be greater than the Basic license price.'
       );
 
       return;
@@ -643,17 +606,17 @@ export default function UploadBeatPage() {
 
       const cleanMasterFile =
         createCleanFile(
-          untaggedFile,
+          masterFile,
           'master'
         );
 
       setStatusMessage(
-        '📤 Uploading tracks securely to Cloudflare R2...'
+        '📤 Uploading tracks securely to private storage...'
       );
 
       const [
         previewKey,
-        masterKey
+        masterKey,
       ] = await Promise.all([
         uploadToR2(
           cleanPreviewFile,
@@ -663,46 +626,38 @@ export default function UploadBeatPage() {
         uploadToR2(
           cleanMasterFile,
           'master'
-        )
+        ),
       ]);
 
       setStatusMessage(
-        '💾 Publishing the beat through the secured server...'
+        '💾 Publishing your free beat securely...'
       );
 
-      await publishBeat({
+      await publishFreeBeat({
         title:
           trimmedTitle,
 
         bpm:
           parsedBpm,
 
-        basicPrice:
-          basicPrice.toFixed(2),
-
-        exclusivePrice:
-          exclusivePrice.toFixed(2),
-
         previewKey,
 
-        masterKey
+        masterKey,
       });
 
       setStatusMessage(
-        '🎉 Success! The beat and its licenses were published securely.'
+        '🎉 Success! Your free beat was published securely.'
       );
 
       setTitle('');
       setBpm('');
-      setPriceBasic('29.99');
-      setPriceExclusive('199.99');
       setPreviewFile(null);
-      setUntaggedFile(null);
+      setMasterFile(null);
 
       form.reset();
     } catch (error) {
       console.error(
-        'Beat upload error:',
+        'Free beat upload error:',
         error
       );
 
@@ -718,31 +673,98 @@ export default function UploadBeatPage() {
     }
   }
 
+  const fieldStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    marginTop: '6px',
+    padding: '11px 12px',
+    border:
+      '1px solid #d0d5dd',
+    borderRadius: '8px',
+    fontSize: '15px',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    color: '#344054',
+    fontSize: '14px',
+    fontWeight: 'bold',
+  };
+
   return (
-    <div
+    <main
       style={{
-        maxWidth: '500px',
+        maxWidth: '620px',
         margin: '40px auto',
-        padding: '20px',
-        fontFamily: 'sans-serif'
+        padding: '0 20px 50px',
+        fontFamily: 'sans-serif',
       }}
     >
-      <h1>
-        Upload Your New Beat
-      </h1>
+      <header
+        style={{
+          marginBottom: '24px',
+        }}
+      >
+        <h1
+          style={{
+            margin: '0 0 10px 0',
+          }}
+        >
+          Upload Beat
+        </h1>
+
+        <p
+          style={{
+            margin: 0,
+            color: '#667085',
+            lineHeight: 1.6,
+          }}
+        >
+          Publish your beat for artists and
+          other creators to discover. New
+          uploads are marked for free download
+          automatically.
+        </p>
+      </header>
+
+      <div
+        style={{
+          marginBottom: '24px',
+          padding: '16px',
+          border:
+            '1px solid #b2ddff',
+          borderRadius: '10px',
+          background: '#eff8ff',
+          color: '#175cd3',
+          fontSize: '14px',
+          lineHeight: 1.6,
+        }}
+      >
+        The preview is used for listening on
+        BeatMarket. The master file remains in
+        private storage and is used for the
+        secure free-download flow. You can
+        disable free downloads later from your
+        Creator Dashboard.
+      </div>
 
       <form
         onSubmit={handleSubmit}
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: '15px'
+          gap: '20px',
+          padding: '24px',
+          border:
+            '1px solid #e5e7eb',
+          borderRadius: '12px',
+          background: '#fff',
         }}
       >
-        <label>
-          <strong>
-            Beat Title *
-          </strong>
+        <label
+          style={labelStyle}
+        >
+          Beat Title *
 
           <input
             type="text"
@@ -755,18 +777,15 @@ export default function UploadBeatPage() {
             }
             required
             disabled={uploading}
-            style={{
-              width: '100%',
-              padding: '8px',
-              marginTop: '4px'
-            }}
+            placeholder="Enter the beat title"
+            style={fieldStyle}
           />
         </label>
 
-        <label>
-          <strong>
-            BPM
-          </strong>
+        <label
+          style={labelStyle}
+        >
+          BPM
 
           <input
             type="number"
@@ -780,88 +799,28 @@ export default function UploadBeatPage() {
               )
             }
             disabled={uploading}
-            style={{
-              width: '100%',
-              padding: '8px',
-              marginTop: '4px'
-            }}
+            placeholder="Optional"
+            style={fieldStyle}
           />
         </label>
 
-        <div
-          style={{
-            display: 'flex',
-            gap: '10px'
-          }}
+        <label
+          style={labelStyle}
         >
-          <label
+          Streaming Preview *
+
+          <span
             style={{
-              flex: 1
+              display: 'block',
+              marginTop: '5px',
+              color: '#667085',
+              fontSize: '13px',
+              fontWeight: 'normal',
+              lineHeight: 1.5,
             }}
           >
-            <strong>
-              Basic License Price ($) *
-            </strong>
-
-            <input
-              type="number"
-              min="0.01"
-              max="1000000"
-              step="0.01"
-              value={priceBasic}
-              onChange={(event) =>
-                setPriceBasic(
-                  event.target.value
-                )
-              }
-              required
-              disabled={uploading}
-              style={{
-                width: '100%',
-                padding: '8px',
-                marginTop: '4px'
-              }}
-            />
-          </label>
-
-          <label
-            style={{
-              flex: 1
-            }}
-          >
-            <strong>
-              Exclusive License Price ($) *
-            </strong>
-
-            <input
-              type="number"
-              min="0.01"
-              max="1000000"
-              step="0.01"
-              value={
-                priceExclusive
-              }
-              onChange={(event) =>
-                setPriceExclusive(
-                  event.target.value
-                )
-              }
-              required
-              disabled={uploading}
-              style={{
-                width: '100%',
-                padding: '8px',
-                marginTop: '4px'
-              }}
-            />
-          </label>
-        </div>
-
-        <label>
-          <strong>
-            Streaming Preview Track
-            (Tagged MP3, maximum 25 MB) *
-          </strong>
+            MP3 only, maximum 25 MB.
+          </span>
 
           <input
             type="file"
@@ -873,17 +832,45 @@ export default function UploadBeatPage() {
             disabled={uploading}
             style={{
               display: 'block',
-              marginTop: '6px'
+              width: '100%',
+              marginTop: '10px',
+              color: '#344054',
             }}
           />
+
+          {previewFile && (
+            <span
+              style={{
+                display: 'block',
+                marginTop: '8px',
+                color: '#067647',
+                fontSize: '13px',
+                fontWeight: 'normal',
+                wordBreak: 'break-word',
+              }}
+            >
+              Selected: {previewFile.name}
+            </span>
+          )}
         </label>
 
-        <label>
-          <strong>
-            Master Audio Track
-            (Untagged MP3/WAV/FLAC,
-            maximum 250 MB) *
-          </strong>
+        <label
+          style={labelStyle}
+        >
+          Free Download Master *
+
+          <span
+            style={{
+              display: 'block',
+              marginTop: '5px',
+              color: '#667085',
+              fontSize: '13px',
+              fontWeight: 'normal',
+              lineHeight: 1.5,
+            }}
+          >
+            MP3, WAV, or FLAC, maximum 250 MB.
+          </span>
 
           <input
             type="file"
@@ -895,51 +882,104 @@ export default function UploadBeatPage() {
             disabled={uploading}
             style={{
               display: 'block',
-              marginTop: '6px'
+              width: '100%',
+              marginTop: '10px',
+              color: '#344054',
             }}
           />
+
+          {masterFile && (
+            <span
+              style={{
+                display: 'block',
+                marginTop: '8px',
+                color: '#067647',
+                fontSize: '13px',
+                fontWeight: 'normal',
+                wordBreak: 'break-word',
+              }}
+            >
+              Selected: {masterFile.name}
+            </span>
+          )}
         </label>
 
         <button
           type="submit"
           disabled={uploading}
           style={{
-            padding: '12px',
-            background: '#0070f3',
-            color: '#fff',
+            marginTop: '4px',
+            padding: '13px 18px',
             border: 'none',
-            borderRadius: '4px',
-
+            borderRadius: '8px',
+            background:
+              uploading
+                ? '#98a2b3'
+                : '#0070f3',
+            color: '#fff',
             cursor:
               uploading
                 ? 'not-allowed'
                 : 'pointer',
-
+            fontSize: '15px',
             fontWeight: 'bold',
-
             opacity:
               uploading
-                ? 0.7
-                : 1
+                ? 0.8
+                : 1,
           }}
         >
           {uploading
-            ? 'Processing Secure Upload...'
-            : 'Publish Beat to Marketplace'}
+            ? 'Publishing Beat...'
+            : 'Publish Beat'}
         </button>
       </form>
 
       {statusMessage && (
-        <p
+        <div
+          aria-live="polite"
           style={{
             marginTop: '20px',
+            padding: '14px 16px',
+            border:
+              statusMessage.startsWith(
+                '❌'
+              )
+                ? '1px solid #fecdca'
+                : statusMessage.startsWith(
+                      '🎉'
+                    )
+                  ? '1px solid #a6f4c5'
+                  : '1px solid #b2ddff',
+            borderRadius: '8px',
+            background:
+              statusMessage.startsWith(
+                '❌'
+              )
+                ? '#fef3f2'
+                : statusMessage.startsWith(
+                      '🎉'
+                    )
+                  ? '#ecfdf3'
+                  : '#eff8ff',
+            color:
+              statusMessage.startsWith(
+                '❌'
+              )
+                ? '#b42318'
+                : statusMessage.startsWith(
+                      '🎉'
+                    )
+                  ? '#067647'
+                  : '#175cd3',
             fontWeight: 'bold',
-            textAlign: 'center'
+            lineHeight: 1.5,
+            textAlign: 'center',
           }}
         >
           {statusMessage}
-        </p>
+        </div>
       )}
-    </div>
+    </main>
   );
 }

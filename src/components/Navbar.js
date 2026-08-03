@@ -8,7 +8,6 @@ import {
 import { usePathname } from 'next/navigation';
 
 import { signOutAction } from '@/app/actions';
-import { useCart } from '@/context/CartContext';
 import { createClient } from '@/lib/supabase-client';
 
 function isMissingSessionError(error) {
@@ -32,8 +31,6 @@ export default function Navbar() {
     isProducer,
     setIsProducer,
   ] = useState(false);
-
-  const { cart } = useCart();
 
   useEffect(() => {
     const supabase = createClient();
@@ -220,40 +217,8 @@ export default function Navbar() {
           Explore
         </Link>
 
-        <div
-          style={{
-            background: '#333',
-            padding: '6px 12px',
-            borderRadius: '20px',
-            fontSize: '0.9rem',
-            fontWeight: 'bold',
-          }}
-        >
-          🛒 Cart ({cart.length})
-        </div>
-
         {user ? (
           <>
-            <Link
-              href="/dashboard"
-              style={{
-                color: '#fff',
-                textDecoration: 'none',
-              }}
-            >
-              Dashboard
-            </Link>
-
-            <Link
-              href="/library"
-              style={{
-                color: '#fff',
-                textDecoration: 'none',
-              }}
-            >
-              Library
-            </Link>
-
             <Link
               href="/profile"
               style={{
@@ -265,15 +230,27 @@ export default function Navbar() {
             </Link>
 
             {isProducer && (
-              <Link
-                href="/upload-beat"
-                style={{
-                  color: '#fff',
-                  textDecoration: 'none',
-                }}
-              >
-                Upload Beat
-              </Link>
+              <>
+                <Link
+                  href="/dashboard"
+                  style={{
+                    color: '#fff',
+                    textDecoration: 'none',
+                  }}
+                >
+                  Dashboard
+                </Link>
+
+                <Link
+                  href="/upload-beat"
+                  style={{
+                    color: '#fff',
+                    textDecoration: 'none',
+                  }}
+                >
+                  Upload Beat
+                </Link>
+              </>
             )}
 
             <span

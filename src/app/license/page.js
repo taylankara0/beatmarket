@@ -2,17 +2,24 @@ import LegalPage, {
   LegalSection,
 } from '@/components/LegalPage';
 
+import {
+  FREE_BEAT_LICENSE_NAME,
+  FREE_BEAT_LICENSE_SUMMARY,
+  FREE_BEAT_LICENSE_TERMS,
+  FREE_BEAT_LICENSE_VERSION,
+} from '@/lib/freeBeatLicense';
+
 export const metadata = {
-  title: 'Beat License',
+  title: 'Beat Licenses',
   description:
-    'General licensing rules for beats purchased through BeatMarket.',
+    'License terms for free non-commercial beats and any separately enabled paid beat licenses on BeatMarket.',
 };
 
 export default function LicensePage() {
   return (
     <LegalPage
-      title="Beat License"
-      lastUpdated="July 30, 2026"
+      title="Beat Licenses"
+      lastUpdated="August 3, 2026"
     >
       <p
         style={{
@@ -20,10 +27,12 @@ export default function LicensePage() {
           color: '#374151',
         }}
       >
-        This Beat License describes the
-        general rights and restrictions that
-        apply when a buyer purchases a beat
-        through BeatMarket.
+        This page describes the license terms
+        that apply when a user downloads a free
+        beat through BeatMarket. It also
+        preserves the general terms for any paid
+        beat licenses that may be separately
+        enabled in the future.
       </p>
 
       <p
@@ -32,13 +41,115 @@ export default function LicensePage() {
           color: '#374151',
         }}
       >
-        The specific license selected during
-        checkout controls the permitted use of
-        the purchased beat. Where an order,
-        listing, or separately supplied
-        license contains more specific terms,
-        those specific terms take priority
-        over this general policy.
+        The license shown and accepted at the
+        time of a download or purchase controls
+        the permitted use of that beat. Where a
+        listing, order, or separately supplied
+        written license contains more specific
+        terms, those specific terms take
+        priority over the general paid-license
+        provisions on this page.
+      </p>
+
+      <LegalSection
+        title={FREE_BEAT_LICENSE_NAME}
+      >
+        <p style={{ margin: 0 }}>
+          <strong>
+            License version:
+          </strong>{' '}
+          {FREE_BEAT_LICENSE_VERSION}
+        </p>
+
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
+          {FREE_BEAT_LICENSE_SUMMARY}
+        </p>
+
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
+          This license becomes effective when an
+          authenticated BeatMarket user accepts
+          this license version and BeatMarket
+          records the acceptance for the selected
+          beat.
+        </p>
+      </LegalSection>
+
+      {FREE_BEAT_LICENSE_TERMS.map(
+        (term, index) => (
+          <LegalSection
+            key={term.title}
+            title={`Free License ${index + 1}. ${term.title}`}
+          >
+            <p style={{ margin: 0 }}>
+              {term.text}
+            </p>
+          </LegalSection>
+        )
+      )}
+
+      <LegalSection title="Free License 8. Scope and termination">
+        <p style={{ margin: 0 }}>
+          Permission applies only to the
+          downloader who accepted this license
+          and only to use that remains within
+          these non-commercial terms.
+        </p>
+
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
+          A material violation of this license
+          may terminate the downloader&apos;s
+          permission. After termination, the
+          downloader must stop using and
+          distributing material that depends on
+          the beat, except where applicable law
+          provides otherwise.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Free License 9. No guarantee">
+        <p style={{ margin: 0 }}>
+          This license does not guarantee
+          distribution approval, platform
+          acceptance, audience growth, or
+          clearance of third-party material.
+          Users remain responsible for complying
+          with applicable law and third-party
+          platform rules.
+        </p>
+      </LegalSection>
+
+      <h2
+        style={{
+          margin: '42px 0 0',
+          color: '#111827',
+          fontSize: '26px',
+          lineHeight: 1.25,
+        }}
+      >
+        Paid Beat License Terms
+      </h2>
+
+      <p
+        style={{
+          margin: '12px 0 0',
+          color: '#374151',
+        }}
+      >
+        The following sections apply only when a
+        paid beat license is separately offered,
+        selected, and successfully purchased.
       </p>
 
       <LegalSection title="1. Parties">
@@ -49,7 +160,11 @@ export default function LicensePage() {
           licensee.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           BeatMarket provides the marketplace,
           payment, delivery, and recordkeeping
           technology but does not become the
@@ -88,7 +203,11 @@ export default function LicensePage() {
           </li>
         </ul>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           A pending, failed, cancelled,
           refunded, reversed, disputed, or
           fraudulent transaction does not
@@ -106,7 +225,11 @@ export default function LicensePage() {
           related material.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Purchasing a license does not mean
           that the buyer purchased the
           producer&apos;s copyright, publishing
@@ -124,14 +247,22 @@ export default function LicensePage() {
           shown at the time of purchase.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           The producer may continue licensing
           the same beat to other buyers unless
           and until an Exclusive license is
           validly completed.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Existing Non-Exclusive licenses are
           not automatically cancelled when a
           later buyer purchases an Exclusive
@@ -149,7 +280,11 @@ export default function LicensePage() {
           payment is completed and confirmed.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           An Exclusive license does not
           automatically transfer the
           producer&apos;s underlying copyright
@@ -158,7 +293,11 @@ export default function LicensePage() {
           assigned.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Previously issued valid licenses may
           remain effective. The buyer accepts
           that earlier licensees may continue
@@ -177,7 +316,11 @@ export default function LicensePage() {
           creative elements.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Permitted uses may include:
         </p>
 
@@ -265,7 +408,11 @@ export default function LicensePage() {
           </li>
         </ul>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           The buyer must obtain an upgraded or
           additional license before exceeding
           any applicable limit.
@@ -280,7 +427,11 @@ export default function LicensePage() {
           credits are normally displayed.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           A suitable credit format is:
         </p>
 
@@ -297,7 +448,11 @@ export default function LicensePage() {
           Produced by [Producer Name]
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           The buyer may not falsely claim that
           they created or produced the
           original beat.
@@ -375,7 +530,11 @@ export default function LicensePage() {
           permits it.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Unauthorized registration may cause
           false claims against the producer or
           other valid licensees and may result
@@ -394,7 +553,11 @@ export default function LicensePage() {
           for their intended use.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           A BeatMarket purchase does not
           automatically clear third-party
           vocals, samples, compositions,
@@ -413,7 +576,11 @@ export default function LicensePage() {
           permission.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           The buyer may work with artists,
           engineers, musicians, distributors,
           labels, and other service providers
@@ -422,7 +589,11 @@ export default function LicensePage() {
           manage the licensed song.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Those collaborators do not receive an
           independent right to reuse or
           redistribute the beat.
@@ -440,7 +611,11 @@ export default function LicensePage() {
           and producer.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           BeatMarket does not determine or
           collect publishing splits unless a
           platform feature or written agreement
@@ -456,7 +631,11 @@ export default function LicensePage() {
           terminate the associated license.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           After termination, the buyer must
           stop using, distributing,
           performing, monetizing, or licensing
@@ -465,7 +644,11 @@ export default function LicensePage() {
           applicable law provides otherwise.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Download access may also be revoked
           after a refund or payment reversal.
         </p>
@@ -479,7 +662,11 @@ export default function LicensePage() {
           rights.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           Depending on the violation, the
           producer may require the buyer to
           stop distribution, remove content,
@@ -498,7 +685,11 @@ export default function LicensePage() {
           through BeatMarket.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           The producer is responsible for
           unauthorized samples, stolen
           content, false ownership claims, and
@@ -573,7 +764,11 @@ export default function LicensePage() {
           relevant evidence.
         </p>
 
-        <p style={{ margin: '14px 0 0' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+          }}
+        >
           BeatMarket may preserve records,
           restrict access, pause payments,
           suspend content, or request
