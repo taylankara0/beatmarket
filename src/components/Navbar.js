@@ -254,6 +254,16 @@ export default function Navbar() {
               Library
             </Link>
 
+            <Link
+              href="/profile"
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+              }}
+            >
+              Profile
+            </Link>
+
             {isProducer && (
               <Link
                 href="/upload-beat"
