@@ -113,9 +113,9 @@ async function getSupabaseAuthClient() {
             );
           } catch {
             /*
-              Authentication can still be read if cookies
-              cannot be updated in this request context.
-            */
+             * Authentication can still be read if cookies
+             * cannot be updated in this request context.
+             */
           }
         },
       },
@@ -273,8 +273,8 @@ async function readJsonBodyWithLimit(
           await reader.cancel();
         } catch {
           /*
-            The request is already being rejected.
-          */
+           * The request is already being rejected.
+           */
         }
 
         return {
@@ -535,6 +535,12 @@ export async function POST(
       );
     }
 
+    /*
+     * IMPORTANT:
+     *
+     * The service-role client bypasses Row Level Security,
+     * so publication status must be verified explicitly.
+     */
     const {
       data: beat,
       error: beatError,
@@ -546,7 +552,8 @@ export async function POST(
         producer_id,
         untagged_file_key,
         is_sold_exclusive,
-        is_free_download_enabled
+        is_free_download_enabled,
+        is_published
       `)
       .eq('id', beatId)
       .maybeSingle();
@@ -562,7 +569,15 @@ export async function POST(
       );
     }
 
-    if (!beat) {
+    /*
+     * Missing and unpublished beats receive the same
+     * response. This prevents direct API access to
+     * unpublished masters.
+     */
+    if (
+      !beat ||
+      beat.is_published !== true
+    ) {
       return createJsonResponse(
         {
           success: false,
@@ -733,11 +748,8 @@ export async function POST(
     return createJsonResponse(
       {
         success: true,
-
         downloadUrl,
-
         filename,
-
         expiresIn: 60,
 
         licenseVersion:

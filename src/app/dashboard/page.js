@@ -7,6 +7,7 @@ import {
   activateProducerProfile,
   saveProducerDisplayName,
   setBeatFreeDownloadAvailability,
+  updateBeatDetails,
 } from './actions';
 
 function formatDate(value) {
@@ -40,7 +41,7 @@ function getDownloadStatus(beat) {
     return {
       label: 'Enabled',
       description:
-        'Visitors will be able to download this beat after the free-download flow is completed.',
+        'Artists can download this beat after accepting the Free Non-Commercial License.',
       background: '#ecfdf3',
       color: '#067647',
     };
@@ -651,9 +652,8 @@ export default async function DashboardPage({
               lineHeight: 1.5,
             }}
           >
-            Free downloads remain disabled until
-            you explicitly enable them for each
-            beat.
+            New free beats have downloads enabled by default.
+            You can disable or re-enable downloads for each beat.
           </p>
         </div>
 
@@ -801,6 +801,113 @@ export default async function DashboardPage({
                         >
                           {status.description}
                         </div>
+
+                        <details
+                          style={{
+                            marginTop: '12px',
+                            maxWidth: '360px',
+                          }}
+                        >
+                          <summary
+                            style={{
+                              color: '#0070f3',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              fontWeight: 'bold',
+                            }}
+                          >
+                            Edit beat details
+                          </summary>
+
+                          <form
+                            action={updateBeatDetails}
+                            style={{
+                              marginTop: '12px',
+                              display: 'grid',
+                              gap: '10px',
+                            }}
+                          >
+                            <input
+                              type="hidden"
+                              name="beat_id"
+                              value={beat.id}
+                            />
+
+                            <label
+                              style={{
+                                display: 'grid',
+                                gap: '5px',
+                                color: '#344054',
+                                fontSize: '13px',
+                                fontWeight: 'bold',
+                              }}
+                            >
+                              Beat title
+
+                              <input
+                                type="text"
+                                name="title"
+                                required
+                                maxLength={120}
+                                defaultValue={beat.title}
+                                style={{
+                                  width: '100%',
+                                  boxSizing: 'border-box',
+                                  padding: '9px 10px',
+                                  border: '1px solid #d0d5dd',
+                                  borderRadius: '8px',
+                                  fontSize: '13px',
+                                }}
+                              />
+                            </label>
+
+                            <label
+                              style={{
+                                display: 'grid',
+                                gap: '5px',
+                                color: '#344054',
+                                fontSize: '13px',
+                                fontWeight: 'bold',
+                              }}
+                            >
+                              BPM (optional)
+
+                              <input
+                                type="number"
+                                name="bpm"
+                                min="1"
+                                max="400"
+                                step="1"
+                                defaultValue={beat.bpm ?? ''}
+                                style={{
+                                  width: '100%',
+                                  boxSizing: 'border-box',
+                                  padding: '9px 10px',
+                                  border: '1px solid #d0d5dd',
+                                  borderRadius: '8px',
+                                  fontSize: '13px',
+                                }}
+                              />
+                            </label>
+
+                            <button
+                              type="submit"
+                              style={{
+                                justifySelf: 'start',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '9px 14px',
+                                background: '#111827',
+                                color: '#fff',
+                                fontSize: '13px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Save beat details
+                            </button>
+                          </form>
+                        </details>
                       </td>
 
                       <td

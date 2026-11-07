@@ -2,15 +2,15 @@ import { createHash } from 'crypto';
 
 import {
   GetObjectCommand,
-  S3Client
+  S3Client,
 } from '@aws-sdk/client-s3';
 
 import {
-  createClient as createSupabaseAdminClient
+  createClient as createSupabaseAdminClient,
 } from '@supabase/supabase-js';
 
 import {
-  consumeApiRateLimit
+  consumeApiRateLimit,
 } from '@/lib/apiRateLimit';
 
 export const runtime = 'nodejs';
@@ -35,8 +35,8 @@ const s3 = new S3Client({
       process.env.R2_ACCESS_KEY_ID,
 
     secretAccessKey:
-      process.env.R2_SECRET_ACCESS_KEY
-  }
+      process.env.R2_SECRET_ACCESS_KEY,
+  },
 });
 
 function getSupabaseAdmin() {
@@ -62,8 +62,8 @@ function getSupabaseAdmin() {
     {
       auth: {
         autoRefreshToken: false,
-        persistSession: false
-      }
+        persistSession: false,
+      },
     }
   );
 }
@@ -92,9 +92,9 @@ function getClientRateLimitIdentifier(
     'unknown';
 
   /*
-    Store only a one-way hash in the rate-limit key
-    instead of retaining the raw IP address.
-  */
+   * Store only a one-way hash in the rate-limit key
+   * instead of retaining the raw IP address.
+   */
   return createHash('sha256')
     .update(
       clientIdentifier.slice(
@@ -109,7 +109,7 @@ function normalizeRangeHeader(value) {
   if (!value) {
     return {
       valid: true,
-      value: null
+      value: null,
     };
   }
 
@@ -124,7 +124,7 @@ function normalizeRangeHeader(value) {
   if (!match) {
     return {
       valid: false,
-      value: null
+      value: null,
     };
   }
 
@@ -140,7 +140,7 @@ function normalizeRangeHeader(value) {
   ) {
     return {
       valid: false,
-      value: null
+      value: null,
     };
   }
 
@@ -177,13 +177,13 @@ function normalizeRangeHeader(value) {
   ) {
     return {
       valid: false,
-      value: null
+      value: null,
     };
   }
 
   return {
     valid: true,
-    value: normalizedValue
+    value: normalizedValue,
   };
 }
 
@@ -207,8 +207,8 @@ export async function GET(request) {
           status: 400,
           headers: {
             'Cache-Control':
-              'no-store'
-          }
+              'no-store',
+          },
         }
       );
     }
@@ -228,8 +228,8 @@ export async function GET(request) {
               'no-store',
 
             'Accept-Ranges':
-              'bytes'
-          }
+              'bytes',
+          },
         }
       );
     }
@@ -250,7 +250,7 @@ export async function GET(request) {
           STREAM_RATE_LIMIT_MAX_REQUESTS,
 
         windowSeconds:
-          STREAM_RATE_LIMIT_WINDOW_SECONDS
+          STREAM_RATE_LIMIT_WINDOW_SECONDS,
       });
 
     if (!rateLimitResult.allowed) {
@@ -270,26 +270,30 @@ export async function GET(request) {
                   rateLimitResult
                     .retryAfterSeconds
                 )
-              )
-          }
+              ),
+          },
         }
       );
     }
 
     /*
-      The browser supplies only the public beat ID.
-
-      The private R2 key is retrieved on the server and
-      is never returned to the browser.
-    */
+     * The browser supplies only the public beat ID.
+     *
+     * The private R2 key is retrieved on the server
+     * and is never returned to the browser.
+     *
+     * Publication status must also be checked here,
+     * because the service-role client bypasses RLS.
+     */
     const {
       data: beat,
-      error: beatError
+      error: beatError,
     } = await supabaseAdmin
       .from('beats')
       .select(`
         id,
-        preview_url
+        preview_url,
+        is_published
       `)
       .eq('id', beatId)
       .maybeSingle();
@@ -306,21 +310,32 @@ export async function GET(request) {
           status: 500,
           headers: {
             'Cache-Control':
-              'no-store'
-          }
+              'no-store',
+          },
         }
       );
     }
 
-    if (!beat?.preview_url) {
+    /*
+     * Unpublished beats must not be streamed,
+     * even if their IDs are already known.
+     *
+     * Return the same 404 response for missing
+     * and unpublished beats.
+     */
+    if (
+      !beat ||
+      beat.is_published !== true ||
+      !beat.preview_url
+    ) {
       return new Response(
         'Preview not found.',
         {
           status: 404,
           headers: {
             'Cache-Control':
-              'no-store'
-          }
+              'no-store',
+          },
         }
       );
     }
@@ -345,9 +360,9 @@ export async function GET(request) {
         ...(rangeResult.value
           ? {
               Range:
-                rangeResult.value
+                rangeResult.value,
             }
-          : {})
+          : {}),
       });
 
     const s3Response =
@@ -360,8 +375,8 @@ export async function GET(request) {
           status: 404,
           headers: {
             'Cache-Control':
-              'no-store'
-          }
+              'no-store',
+          },
         }
       );
     }
@@ -380,9 +395,14 @@ export async function GET(request) {
       'bytes'
     );
 
+    /*
+     * Do not cache streaming responses.
+     * Otherwise cached previews may remain
+     * accessible after a beat is unpublished.
+     */
     headers.set(
       'Cache-Control',
-      'public, max-age=3600, s-maxage=3600'
+      'no-store'
     );
 
     headers.set(
@@ -429,7 +449,7 @@ export async function GET(request) {
             ? 206
             : 200,
 
-        headers
+        headers,
       }
     );
   } catch (error) {
@@ -444,8 +464,8 @@ export async function GET(request) {
         status: 404,
         headers: {
           'Cache-Control':
-            'no-store'
-        }
+            'no-store',
+        },
       }
     );
   }

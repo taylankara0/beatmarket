@@ -145,6 +145,7 @@ export default function ExplorePage() {
               display_name
             )
           `)
+          .eq('is_published', true)
           .order(
             'created_at',
             {
@@ -172,11 +173,11 @@ export default function ExplorePage() {
         setBeats([]);
       } else {
         /*
-          Beats previously sold through an
-          Exclusive license must not be
-          redistributed through the free-sharing
-          experience.
-        */
+         * Beats previously sold through an
+         * Exclusive license must not be
+         * redistributed through the free-sharing
+         * experience.
+         */
         const availableBeats =
           (
             beatsResult.data || []
@@ -844,7 +845,7 @@ export default function ExplorePage() {
               href="/license"
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-5 inline-flex rounded-lg border border-indigo-500 px-4 py-2 text-sm font-semibold text-indigo-300 transition hover:bg-indigo-950 hover:text-indigo-200"
+              className="mt-5 inline-flex rounded-lg border border-indigo-500 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-950 hover:text-indigo-200"
             >
               Read the Full License Terms
             </Link>

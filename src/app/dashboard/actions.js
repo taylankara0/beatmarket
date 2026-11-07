@@ -12,6 +12,10 @@ import { createClient } from '@/lib/supabase-server';
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const MAX_BEAT_TITLE_LENGTH = 120;
+const MIN_BEAT_BPM = 1;
+const MAX_BEAT_BPM = 400;
+
 function getSupabaseAdmin() {
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -379,6 +383,207 @@ export async function setBeatFreeDownloadAvailability(
   redirect(
     `/dashboard?success=${encodeURIComponent(
       successMessage
+    )}`
+  );
+}
+
+export async function updateBeatDetails(
+  formData
+) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    redirect('/login');
+  }
+
+  const beatId = String(
+    formData.get('beat_id') || ''
+  ).trim();
+
+  const rawTitle =
+    formData.get('title');
+
+  const title =
+    typeof rawTitle === 'string'
+      ? rawTitle
+          .trim()
+          .replace(/\s+/g, ' ')
+      : '';
+
+  const rawBpm =
+    formData.get('bpm');
+
+  const bpmText =
+    typeof rawBpm === 'string'
+      ? rawBpm.trim()
+      : '';
+
+  const bpm =
+    bpmText === ''
+      ? null
+      : Number(bpmText);
+
+  if (!UUID_PATTERN.test(beatId)) {
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'The selected beat is invalid.'
+      )}`
+    );
+  }
+
+  if (
+    title.length < 1 ||
+    title.length > MAX_BEAT_TITLE_LENGTH
+  ) {
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'Beat title must contain between 1 and 120 characters.'
+      )}`
+    );
+  }
+
+  if (
+    bpm !== null &&
+    (
+      !Number.isInteger(bpm) ||
+      bpm < MIN_BEAT_BPM ||
+      bpm > MAX_BEAT_BPM
+    )
+  ) {
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'BPM must be a whole number between 1 and 400.'
+      )}`
+    );
+  }
+
+  const {
+    data: profile,
+    error: profileError,
+  } = await supabase
+    .from('profiles')
+    .select(
+      'is_producer, username'
+    )
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (
+    profileError ||
+    !profile?.is_producer
+  ) {
+    console.error(
+      'Beat editing producer authorization error:',
+      profileError
+    );
+
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'Only an active producer can edit beats.'
+      )}`
+    );
+  }
+
+  const supabaseAdmin =
+    getSupabaseAdmin();
+
+  const {
+    data: beat,
+    error: beatError,
+  } = await supabaseAdmin
+    .from('beats')
+    .select(`
+      id,
+      producer_id,
+      title,
+      bpm
+    `)
+    .eq('id', beatId)
+    .maybeSingle();
+
+  if (
+    beatError ||
+    !beat
+  ) {
+    console.error(
+      'Beat editing lookup error:',
+      beatError
+    );
+
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'The selected beat could not be found.'
+      )}`
+    );
+  }
+
+  if (beat.producer_id !== user.id) {
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'You can only edit your own beats.'
+      )}`
+    );
+  }
+
+  if (
+    beat.title === title &&
+    beat.bpm === bpm
+  ) {
+    redirect(
+      `/dashboard?success=${encodeURIComponent(
+        'This beat already has the selected details.'
+      )}`
+    );
+  }
+
+  const {
+    data: updatedBeat,
+    error: updateError,
+  } = await supabaseAdmin
+    .from('beats')
+    .update({
+      title,
+      bpm,
+    })
+    .eq('id', beat.id)
+    .eq('producer_id', user.id)
+    .select('id')
+    .maybeSingle();
+
+  if (
+    updateError ||
+    !updatedBeat
+  ) {
+    console.error(
+      'Beat editing update error:',
+      updateError
+    );
+
+    redirect(
+      `/dashboard?error=${encodeURIComponent(
+        'The beat details could not be saved. Please try again.'
+      )}`
+    );
+  }
+
+  revalidatePath('/dashboard');
+  revalidatePath('/explore');
+  revalidatePath('/profile');
+
+  if (profile.username) {
+    revalidatePath(
+      `/profile/${profile.username}`
+    );
+  }
+
+  redirect(
+    `/dashboard?success=${encodeURIComponent(
+      `The details for "${title}" have been saved.`
     )}`
   );
 }

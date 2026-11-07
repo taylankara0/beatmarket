@@ -115,6 +115,7 @@ const VALID_BEAT = {
     'test/master/free-test-beat.mp3',
   is_sold_exclusive: false,
   is_free_download_enabled: true,
+  is_published: true,
 };
 
 function createRequest() {
@@ -281,6 +282,42 @@ describe(
 
         expect(
           mocks.r2Send
+        ).not.toHaveBeenCalled();
+
+        expectNoSecureDownload();
+      }
+    );
+
+    it(
+      'blocks downloads of unpublished beats',
+      async () => {
+        mocks.beatMaybeSingle
+          .mockResolvedValue({
+            data: {
+              ...VALID_BEAT,
+              is_published: false,
+              is_free_download_enabled: true,
+            },
+
+            error: null,
+          });
+
+        const { response, body } =
+          await sendRequest();
+
+        expect(response.status).toBe(404);
+
+        expect(body).toEqual({
+          success: false,
+          error: 'Beat not found.',
+        });
+
+        expect(
+          mocks.r2Send
+        ).not.toHaveBeenCalled();
+
+        expect(
+          mocks.getSignedUrl
         ).not.toHaveBeenCalled();
 
         expectNoSecureDownload();

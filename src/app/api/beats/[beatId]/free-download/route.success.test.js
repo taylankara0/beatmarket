@@ -125,6 +125,8 @@ const VALID_BEAT = {
   is_sold_exclusive: false,
 
   is_free_download_enabled: true,
+
+  is_published: true,
 };
 
 function createRequest() {
@@ -320,6 +322,14 @@ describe(
         ).toHaveBeenCalledWith(
           'id',
           VALID_BEAT_ID
+        );
+
+        expect(
+          mocks.beatSelect
+        ).toHaveBeenCalledWith(
+          expect.stringContaining(
+            'is_published'
+          )
         );
 
         expect(
